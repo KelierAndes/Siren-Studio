@@ -1,0 +1,29 @@
+[package]
+name = "audio-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+rtrb.workspace = true
+mdns-sd.workspace = true
+opus-head-sys.workspace = true
+cpal.workspace = true
+hound.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+wasapi = "0.26"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Networking_WinSock",
+    "Win32_Devices_Bluetooth",
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libpulse-binding = { workspace = true }
+libpulse-simple-binding = { workspace = true }
+libc = "0.2"

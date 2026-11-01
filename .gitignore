@@ -1,0 +1,11 @@
+/target
+**/target/
+*.wav
+*.jsonl
+__pycache__/
+
+# Build/runtime artifacts and local scratch
+*.log
+ui_debug.log
+/NVIDIA Corporation/
+.qoder/

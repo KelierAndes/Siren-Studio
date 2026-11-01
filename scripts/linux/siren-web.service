@@ -1,0 +1,22 @@
+[Unit]
+Description=SirenStudio mesh node (WebUI)
+Documentation=https://github.com/sirenstudio
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Run as the same user as the PulseAudio/PipeWire server you want to capture.
+User=kelierandes
+# Must point at that server's runtime directory (systemd login session:
+# /run/user/1000; headless pulseaudio started by run-headless.sh:
+# /tmp/siren-runtime).
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+# Optional structural isolation on a PipeWire desktop: append
+#   --isolate pipewire --output-sink <hardware sink>
+ExecStart=/usr/local/bin/siren --log info web --listen 0.0.0.0:8080 --autostart --source loopback --name %H
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

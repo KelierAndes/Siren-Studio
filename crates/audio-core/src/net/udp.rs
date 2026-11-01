@@ -1,0 +1,1586 @@
+//! UDP audio transport.
+//!
+//! One sender = one stream id. The receiver demultiplexes by
+//! `(source address, stream id)`, creates an independent lock-free ring plus
+//! drift-correcting channel per sender, conceals Opus loss, and retires
+//! streams that have been silent for a few seconds.
+
+use std::collections::{HashMap, VecDeque};
+use std::net::{SocketAddr, UdpSocket};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
+
+use rtrb::Producer;
+
+use super::codec::{AudioDecoder, AudioEncoder};
+use crate::dsp::spectrum::SpectrumAnalyzer;
+use crate::dsp::{MixerControl, StreamChannel};
+use crate::format::{frames_for_ms, CHANNELS, SAMPLE_RATE};
+use crate::metrics::{linear_to_db, now_us, store_f32, MetricsRegistry, StreamMetrics};
+use crate::protocol::{Codec, FrameHeader};
+use crate::{CoreError, Result};
+
+const PEER_RING_SAMPLES: usize = SAMPLE_RATE as usize * CHANNELS; // one second
+const MAX_PLC_PACKETS: u32 = 6;
+const MAX_GAP_FILL_MS: f32 = 100.0;
+const PEER_TIMEOUT: Duration = Duration::from_secs(3);
+const BT_PEER_TIMEOUT: Duration = Duration::from_secs(8);
+/// RFCOMM has bursts and long stalls; a Bluetooth-only stream gets a wider
+/// jitter buffer than the LAN default.
+const BT_STREAM_TARGET_MS: f32 = 250.0;
+/// Upper bound for the adaptive Bluetooth buffer (adds latency, but a
+/// drop-out-free link beats a tight one on RFCOMM).
+const BT_MAX_TARGET_MS: f32 = 400.0;
+/// 10 ms of stereo audio at 48 kHz, the window a hub keeps per origin for
+/// building N-1 mixes.
+const MIX_TAP_SAMPLES: usize = 960;
+/// While individual Wi-Fi streams are this fresh, a Bluetooth hub mix is
+/// dropped (Wi-Fi wins).
+const MIX_YIELD_TO_WIFI: Duration = Duration::from_millis(500);
+/// A hub mix counts as active while a packet arrived this recently.
+const MIX_ACTIVE: Duration = Duration::from_millis(600);
+
+/// Whether any origin inside `mask` lacks a fresh direct copy.
+fn mask_needs(mask: u64, known: &HashMap<u64, (Instant, bool)>, now: Instant) -> bool {
+    if mask == 0 {
+        return false;
+    }
+    let mut bits = mask;
+    while bits != 0 {
+        let bit = bits.trailing_zeros();
+        bits &= bits - 1;
+        let want = 1u64 << bit;
+        let fresh = known.iter().any(|(origin, (at, wifi))| {
+            *wifi && (1u64 << (origin % 64)) == want && now.duration_since(*at) < NORMAL_FRESH
+        });
+        if !fresh {
+            return true;
+        }
+    }
+    false
+}
+/// An individual stream counts as live for mix arbitration while it is this
+/// fresh.
+const NORMAL_FRESH: Duration = Duration::from_millis(400);
+/// How long an origin stays part of the expected set after its last packet.
+const KNOWN_NORMAL_TTL: Duration = Duration::from_secs(60);
+/// A stream silent for longer than this is treated as stalled when it comes
+/// back with a large sequence jump.
+const CARRIER_STALL: Duration = Duration::from_millis(200);
+const BT_TARGET_STREAK: u32 = 40;
+
+pub struct UdpSender {
+    socket: UdpSocket,
+    target: SocketAddr,
+    packer: FramePacker,
+    bytes_sent: u64,
+    packets_sent: u64,
+    fail_streak: u32,
+    dead_until: Option<Instant>,
+    last_fail_log: Option<Instant>,
+}
+
+/// One shared encoder/sequence per node. Dual-stack sends the *same* encoded
+/// datagram over Wi-Fi and Bluetooth so the receiver can identify both copies
+/// by `(origin, stream_id, seq)` and keep whichever arrives first.
+pub struct FramePacker {
+    stream_id: u16,
+    seq: u32,
+    frame_ms: u16,
+    codec: Codec,
+    origin: u64,
+    encoder: AudioEncoder,
+    payload: Vec<u8>,
+    packet: Vec<u8>,
+}
+
+impl FramePacker {
+    pub fn new(codec: Codec, frame_ms: u16, origin: u64) -> Result<Self> {
+        Self::with_stream(codec, frame_ms, origin, stream_id_from_clock(), None)
+    }
+
+    /// Secondary carrier packer: shares the primary `stream_id` (so the
+    /// receiver treats both as one logical stream) but encodes independently
+    /// — the Bluetooth carrier uses a low-bitrate Opus to fit narrow links.
+    pub fn with_stream(
+        codec: Codec,
+        frame_ms: u16,
+        origin: u64,
+        stream_id: u16,
+        bitrate: Option<i32>,
+    ) -> Result<Self> {
+        Ok(Self {
+            stream_id,
+            seq: 0,
+            frame_ms,
+            codec,
+            origin,
+            encoder: AudioEncoder::with_bitrate(codec, bitrate)?,
+            payload: Vec::with_capacity(2048),
+            packet: Vec::with_capacity(4096),
+        })
+    }
+
+    pub fn stream_id(&self) -> u16 {
+        self.stream_id
+    }
+
+    /// Encode one interleaved stereo frame; the returned datagram stays valid
+    /// until the next `build` call.
+    pub fn build(&mut self, pcm: &[f32]) -> Result<&[u8]> {
+        self.build_with(pcm, false)
+    }
+
+    /// Bluetooth framing: 20 B header instead of 28 B (no timestamp).
+    pub fn build_compact(&mut self, pcm: &[f32]) -> Result<&[u8]> {
+        self.build_with(pcm, true)
+    }
+
+    /// Build a hub N-1 mix frame (v4) that declares which origins it holds.
+    pub fn build_mix(&mut self, pcm: &[f32], mask: u64) -> Result<&[u8]> {
+        self.build_parts(pcm, false, None, Some(mask))
+    }
+
+    /// Build the secondary-carrier datagram with the primary carrier's
+    /// sequence number. Both carriers must share one sequence timeline:
+    /// a secondary counter that drifts behind makes the receiver reject
+    /// every Bluetooth copy as a late duplicate, and after a Wi-Fi loss it
+    /// stays silent until that drift has been consumed.
+    pub fn build_compact_with_seq(&mut self, pcm: &[f32], seq: u32) -> Result<&[u8]> {
+        self.build_parts(pcm, true, Some(seq), None)
+    }
+
+    fn build_with(&mut self, pcm: &[f32], compact: bool) -> Result<&[u8]> {
+        self.build_parts(pcm, compact, None, None)
+    }
+
+    fn build_parts(
+        &mut self,
+        pcm: &[f32],
+        compact: bool,
+        seq_override: Option<u32>,
+        mix_mask: Option<u64>,
+    ) -> Result<&[u8]> {
+        let seq = seq_override.unwrap_or(self.seq);
+        let header = FrameHeader::new(
+            self.codec,
+            self.frame_ms,
+            self.stream_id,
+            seq,
+            now_us(),
+            self.origin,
+        );
+        self.packet.clear();
+        if let Some(mask) = mix_mask {
+            self.packet.extend_from_slice(&header.encode_mix(mask));
+        } else if compact {
+            self.packet.extend_from_slice(&header.encode_compact());
+        } else {
+            self.packet.extend_from_slice(&header.encode());
+        }
+        let written = self.encoder.encode(pcm, &mut self.payload)?;
+        self.packet.extend_from_slice(&self.payload[..written]);
+        if seq_override.is_none() {
+            self.seq = self.seq.wrapping_add(1);
+        }
+        Ok(&self.packet)
+    }
+
+    /// Sequence number the next primary frame will carry.
+    pub fn next_seq(&self) -> u32 {
+        self.seq
+    }
+}
+
+impl UdpSender {
+    pub fn new(target: SocketAddr, codec: Codec, frame_ms: u16, origin: u64) -> Result<Self> {
+        let socket = UdpSocket::bind("0.0.0.0:0")?;
+        socket.set_write_timeout(Some(Duration::from_millis(200)))?;
+        let socket_target = if target.ip().is_unspecified() {
+            SocketAddr::new(
+                std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+                target.port(),
+            )
+        } else {
+            target
+        };
+        socket.connect(socket_target)?;
+        Ok(Self {
+            socket,
+            target: socket_target,
+            packer: FramePacker::new(codec, frame_ms, origin)?,
+            bytes_sent: 0,
+            packets_sent: 0,
+            fail_streak: 0,
+            dead_until: None,
+            last_fail_log: None,
+        })
+    }
+
+    pub fn local_addr(&self) -> Result<SocketAddr> {
+        Ok(self.socket.local_addr()?)
+    }
+
+    pub fn target(&self) -> SocketAddr {
+        self.target
+    }
+
+    pub fn stream_id(&self) -> u16 {
+        self.packer.stream_id
+    }
+
+    pub fn bytes_sent(&self) -> u64 {
+        self.bytes_sent
+    }
+
+    pub fn packets_sent(&self) -> u64 {
+        self.packets_sent
+    }
+
+    /// Encode and send one interleaved stereo frame. Returns datagram size.
+    pub fn send(&mut self, pcm: &[f32]) -> Result<usize> {
+        let packet = self.packer.build(pcm)?.to_vec();
+        self.send_packet(&packet)
+    }
+
+    /// Send a datagram produced by the shared [`FramePacker`]. Carries the
+    /// same `(origin, stream_id, seq)` as every other carrier this tick.
+    ///
+    /// A sender whose destination vanished (Wi-Fi off, peer gone) fails on
+    /// every 5 ms tick; retrying 200 times a second floods the log and burns
+    /// CPU on phones. After a short run of failures the socket is parked for
+    /// a second and failures are reported at most once per second.
+    pub fn send_packet(&mut self, packet: &[u8]) -> Result<usize> {
+        if let Some(at) = self.dead_until {
+            if at > Instant::now() {
+                return Ok(0);
+            }
+            self.dead_until = None;
+        }
+        match self.socket.send(packet) {
+            Ok(sent) => {
+                self.fail_streak = 0;
+                self.packets_sent += 1;
+                self.bytes_sent += sent as u64;
+                Ok(sent)
+            }
+            Err(error) => {
+                self.fail_streak = self.fail_streak.saturating_add(1);
+                if self.fail_streak >= 20 {
+                    self.fail_streak = 0;
+                    self.dead_until = Some(Instant::now() + Duration::from_secs(1));
+                }
+                let now = Instant::now();
+                let report = self
+                    .last_fail_log
+                    .map(|at| now.duration_since(at) >= Duration::from_secs(1))
+                    .unwrap_or(true);
+                if report {
+                    self.last_fail_log = Some(now);
+                    Err(CoreError::Backend(format!("udp send: {error}")))
+                } else {
+                    Ok(0)
+                }
+            }
+        }
+    }
+}
+
+fn stream_id_from_clock() -> u16 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let pid = std::process::id();
+    let id = (nanos ^ pid.wrapping_mul(2654435761)) as u16;
+    if id == crate::protocol::MIX_STREAM_ID {
+        id.wrapping_add(1)
+    } else {
+        id
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ReceiverConfig {
+    pub bind: SocketAddr,
+    pub target_ms: f32,
+    pub max_streams: usize,
+    /// Live copy of the user's buffer target; the UI may change it after the
+    /// receiver started. Falls back to `target_ms` for fixed setups.
+    pub live_target_ms: Option<Arc<AtomicU32>>,
+    /// Decoded audio per origin, consumed by a hub that forwards N-1 mixes
+    /// over Bluetooth.
+    pub mix_tap: Option<Arc<MixTap>>,
+}
+
+/// Latest decoded audio per origin. A hub builds one mix per Bluetooth link
+/// from this tap instead of forwarding every stream separately, halving the
+/// downlink traffic on narrow links.
+#[derive(Debug)]
+pub struct MixTap {
+    blocks: Mutex<HashMap<u64, TapBlock>>,
+}
+
+#[derive(Debug)]
+struct TapBlock {
+    samples: VecDeque<f32>,
+    updated: Instant,
+    /// Latest copy arrived over Bluetooth (the origin's Wi-Fi is gone).
+    bt: bool,
+}
+
+impl MixTap {
+    pub fn new() -> Self {
+        Self {
+            blocks: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Keep the most recent `keep` samples for one origin.
+    pub fn push(&self, origin: u64, samples: &[f32], keep: usize, bt: bool) {
+        if origin == 0 || samples.is_empty() {
+            return;
+        }
+        let mut blocks = self.blocks.lock().unwrap();
+        let block = blocks.entry(origin).or_insert_with(|| TapBlock {
+            samples: VecDeque::with_capacity(keep),
+            updated: Instant::now(),
+            bt,
+        });
+        block.bt = bt;
+        for &sample in samples {
+            if block.samples.len() >= keep {
+                block.samples.pop_front();
+            }
+            block.samples.push_back(sample);
+        }
+        block.updated = Instant::now();
+    }
+
+    /// Newest `want` samples of every origin that produced audio recently.
+    pub fn snapshot(
+        &self,
+        want: usize,
+        exclude: u64,
+        max_age: Duration,
+    ) -> Vec<(u64, Vec<f32>, bool)> {
+        let now = Instant::now();
+        let blocks = self.blocks.lock().unwrap();
+        blocks
+            .iter()
+            .filter(|(origin, block)| {
+                **origin != exclude
+                    && !block.samples.is_empty()
+                    && now.duration_since(block.updated) < max_age
+            })
+            .map(|(origin, block)| {
+                let take = want.min(block.samples.len());
+                let skip = block.samples.len() - take;
+                (
+                    *origin,
+                    block.samples.iter().skip(skip).copied().collect(),
+                    block.bt,
+                )
+            })
+            .collect()
+    }
+}
+
+impl Default for MixTap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Buffer target currently in force (the UI value wins over the start value).
+fn target_now(config: &ReceiverConfig) -> f32 {
+    config
+        .live_target_ms
+        .as_ref()
+        .map(|value| f32::from_bits(value.load(Ordering::Relaxed)))
+        .filter(|value| (5.0..=500.0).contains(value))
+        .unwrap_or(config.target_ms)
+}
+
+#[derive(Default)]
+pub struct ReceiverStats {
+    pub datagrams: AtomicU64,
+    pub bytes: AtomicU64,
+    pub bad_packets: AtomicU64,
+    pub timeouts: AtomicU64,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ReceiverStatsSnapshot {
+    pub datagrams: u64,
+    pub bytes: u64,
+    pub bad_packets: u64,
+    pub timeouts: u64,
+}
+
+impl ReceiverStats {
+    pub fn snapshot(&self) -> ReceiverStatsSnapshot {
+        ReceiverStatsSnapshot {
+            datagrams: self.datagrams.load(Ordering::Relaxed),
+            bytes: self.bytes.load(Ordering::Relaxed),
+            bad_packets: self.bad_packets.load(Ordering::Relaxed),
+            timeouts: self.timeouts.load(Ordering::Relaxed),
+        }
+    }
+}
+
+pub struct ReceiverHandle {
+    pub local_addr: SocketAddr,
+    pub registry: Arc<MetricsRegistry>,
+    pub stats: Arc<ReceiverStats>,
+    stop: Arc<AtomicBool>,
+    join: Option<JoinHandle<()>>,
+}
+
+impl ReceiverHandle {
+    pub fn stop(mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
+
+impl Drop for ReceiverHandle {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
+
+pub fn spawn(config: ReceiverConfig, mixer: MixerControl) -> Result<ReceiverHandle> {
+    let socket = UdpSocket::bind(config.bind)
+        .map_err(|e| CoreError::Backend(format!("bind {}: {e}", config.bind)))?;
+    socket.set_read_timeout(Some(Duration::from_millis(100)))?;
+    let local_addr = socket.local_addr()?;
+    let stop = Arc::new(AtomicBool::new(false));
+    let registry = Arc::new(MetricsRegistry::default());
+    let stats = Arc::new(ReceiverStats::default());
+
+    let thread_stop = stop.clone();
+    let thread_registry = registry.clone();
+    let thread_stats = stats.clone();
+    let join = thread::Builder::new()
+        .name("siren-udp-receiver".into())
+        .spawn(move || {
+            run(
+                socket,
+                config,
+                mixer,
+                thread_registry,
+                thread_stats,
+                thread_stop,
+            );
+        })
+        .map_err(|e| CoreError::Backend(format!("spawn receiver: {e}")))?;
+
+    Ok(ReceiverHandle {
+        local_addr,
+        registry,
+        stats,
+        stop,
+        join: Some(join),
+    })
+}
+
+/// Logical stream identity. With a version 2 header the `origin` id is stable
+/// across carriers, so the same frame arriving over Wi-Fi and Bluetooth maps
+/// to one peer (and `seq` drops the second copy). Legacy version 1 packets
+/// fall back to the source address.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum PeerKey {
+    Origin(u64, u16),
+    Addr(SocketAddr, u16),
+}
+
+impl PeerKey {
+    fn new(origin: u64, addr: SocketAddr, stream_id: u16) -> Self {
+        if origin == 0 {
+            Self::Addr(addr, stream_id)
+        } else {
+            Self::Origin(origin, stream_id)
+        }
+    }
+}
+
+struct Peer {
+    id: u64,
+    origin: u64,
+    codec: Codec,
+    producer: Producer<f32>,
+    /// Dual-stack delivers the same frame encoded differently per carrier
+    /// (raw over Wi-Fi, Opus over Bluetooth); keep one decoder per codec and
+    /// pick per packet. The sequence timeline is shared by both carriers.
+    decoders: [Option<AudioDecoder>; 2],
+    last_seq: Option<u32>,
+    last_seen: Instant,
+    metrics: Arc<StreamMetrics>,
+    zero_buf: Vec<f32>,
+    /// Consecutive frames delivered over the Bluetooth (loopback) carrier.
+    bt_streak: u32,
+    /// Latest copy arrived over the Bluetooth (loopback) carrier.
+    last_path_bt: bool,
+    /// Last copy seen over Wi-Fi, even when Bluetooth won the race. A hub uses
+    /// this to decide whether the peer's Wi-Fi is still healthy.
+    last_wifi_seen: Instant,
+    /// Codec of the latest delivered copy; a change also signals a carrier
+    /// switch (Wi-Fi raw <-> Bluetooth Opus).
+    last_codec: Codec,
+    /// Whether the buffer target was raised for a Bluetooth-only carrier.
+    bt_target_raised: bool,
+    /// Current adaptive target for a Bluetooth-only carrier (ms).
+    bt_target_ms: f32,
+    analyzer: SpectrumAnalyzer,
+    last_underruns: u32,
+    last_target_check: Instant,
+    last_target_decay: Instant,
+    last_report: Instant,
+}
+
+impl Peer {
+    fn decoder(&mut self, codec: Codec) -> Result<&mut AudioDecoder> {
+        let index = codec as usize;
+        if index >= 2 {
+            return Err(CoreError::Codec("unknown codec".into()));
+        }
+        if self.decoders[index].is_none() {
+            self.decoders[index] = Some(AudioDecoder::new(codec)?);
+        }
+        Ok(self.decoders[index].as_mut().unwrap())
+    }
+
+    fn deliver(
+        &mut self,
+        payload: &[u8],
+        codec: Codec,
+        tap: Option<&MixTap>,
+        bt: bool,
+    ) -> Result<usize> {
+        // The decoder returns a slice into its own buffer, so copy it out
+        // before touching the ring producer again.
+        let samples: Vec<f32> = {
+            let decoder = self.decoder(codec)?;
+            decoder.decode(payload)?.to_vec()
+        };
+        if let Some(tap) = tap {
+            tap.push(self.origin, &samples, MIX_TAP_SAMPLES, bt);
+        }
+        self.analyzer.push(&samples, &self.metrics);
+        if self.metrics.packets.load(Ordering::Relaxed) == 0 {
+            let peak = samples.iter().fold(0.0f32, |acc, s| acc.max(s.abs()));
+            let prefix: Vec<String> = payload
+                .iter()
+                .take(24)
+                .map(|byte| format!("{byte:02X}"))
+                .collect();
+            log::info!(
+                "stream {} first packet: {:?} {} B peak {:.4} [{}]",
+                self.id,
+                codec,
+                payload.len(),
+                peak,
+                prefix.join(" ")
+            );
+        }
+        let frames = samples.len() / CHANNELS;
+        let (_, rest) = self.producer.push_partial_slice(&samples);
+        if !rest.is_empty() {
+            self.metrics.overflow_packets.fetch_add(1, Ordering::Relaxed);
+        }
+        Ok(frames)
+    }
+
+    /// Opus packet-loss concealment; returns concealed frames.
+    fn conceal(&mut self, packets: u32, frame_frames: u32) -> u32 {
+        let mut hidden = 0u32;
+        let Some(decoder) = self.decoders[Codec::Opus as usize].as_mut() else {
+            return 0;
+        };
+        {
+            let decoder = decoder;
+            let producer = &mut self.producer;
+            let metrics = &self.metrics;
+            for _ in 0..packets {
+                match decoder.conceal(frame_frames as usize) {
+                    Ok(Some(samples)) => {
+                        let frames = (samples.len() / CHANNELS) as u32;
+                        let (_, rest) = producer.push_partial_slice(samples);
+                        if !rest.is_empty() {
+                            metrics.overflow_packets.fetch_add(1, Ordering::Relaxed);
+                        }
+                        hidden += frames;
+                    }
+                    Ok(None) => break,
+                    Err(error) => {
+                        log::warn!("opus PLC failed: {error}");
+                        break;
+                    }
+                }
+            }
+        }
+        hidden
+    }
+
+    fn zero_fill(&mut self, frames: u32) {
+        let mut remaining = frames.min(frames_for_ms(MAX_GAP_FILL_MS) as u32);
+        while remaining > 0 {
+            let chunk = remaining.min((self.zero_buf.len() / CHANNELS) as u32) as usize;
+            let (_, rest) = self.producer.push_partial_slice(&self.zero_buf[..chunk * CHANNELS]);
+            if !rest.is_empty() {
+                self.metrics.overflow_packets.fetch_add(1, Ordering::Relaxed);
+                break;
+            }
+            remaining -= chunk as u32;
+        }
+    }
+}
+
+fn run(
+    socket: UdpSocket,
+    config: ReceiverConfig,
+    mixer: MixerControl,
+    registry: Arc<MetricsRegistry>,
+    stats: Arc<ReceiverStats>,
+    stop: Arc<AtomicBool>,
+) {
+    crate::platform::boost_thread_priority();
+    let mut peers: HashMap<PeerKey, Peer> = HashMap::new();
+    let mut buffer = vec![0u8; 65_536];
+    // A hub mix arrives over Bluetooth as a reserved stream id. It is a
+    // fallback: while Wi-Fi copies of the individual streams are arriving it
+    // is dropped, and when it takes over the individual buffers are flushed
+    // so the same audio is not played twice.
+    let mut last_mix_at = Instant::now() - Duration::from_secs(30);
+    let mut mix_stream: Option<u64> = None;
+    // Individual (non-mix) origins seen recently, with their last path.
+    // The hub mix is a fallback for exactly these streams, so it is only used
+    // while at least one of them is missing. Pruning keeps a node that left
+    // (or an earlier session's stream) from pinning the mix on forever.
+    let mut known_normals: HashMap<u64, (Instant, bool)> = HashMap::new();
+    let mut active_mix_mask: u64 = 0;
+
+    while !stop.load(Ordering::Relaxed) {
+        match socket.recv_from(&mut buffer) {
+            Ok((len, addr)) => {
+                stats.datagrams.fetch_add(1, Ordering::Relaxed);
+                stats.bytes.fetch_add(len as u64, Ordering::Relaxed);
+                let datagram = &buffer[..len];
+                let header = match FrameHeader::decode(datagram) {
+                    Ok((header, payload)) => (header, payload),
+                    Err(error) => {
+                        stats.bad_packets.fetch_add(1, Ordering::Relaxed);
+                        let prefix: Vec<String> = datagram
+                            .iter()
+                            .take(8)
+                            .map(|byte| format!("{byte:02X}"))
+                            .collect();
+                        log::debug!(
+                            "bad datagram from {addr}: {error} ({} B, [{}])",
+                            datagram.len(),
+                            prefix.join(" ")
+                        );
+                        continue;
+                    }
+                };
+                let (header, payload) = header;
+                let key = PeerKey::new(header.origin, addr, header.stream_id);
+                let is_mix = header.stream_id == crate::protocol::MIX_STREAM_ID;
+                let is_bt = addr.ip().is_loopback();
+                let now = Instant::now();
+                if !is_mix && header.origin != 0 {
+                    known_normals.insert(header.origin, (now, !is_bt));
+                    known_normals.retain(|_, (at, _)| {
+                        now.duration_since(*at) < KNOWN_NORMAL_TTL
+                    });
+                }
+                if is_mix {
+                    // A mix carries a bitmask of the origins inside it. It is
+                    // only needed while one of them is missing from the
+                    // direct Wi-Fi copies.
+                    if !mask_needs(header.mix_mask, &known_normals, now) {
+                        continue;
+                    }
+                } else if now.duration_since(last_mix_at) < MIX_ACTIVE && mix_stream.is_some() {
+                    // A mix is feeding this node. Individual copies it covers
+                    // would be heard twice; copies it does not cover (e.g. a
+                    // peer still reachable directly while the hub is offline)
+                    // must keep playing.
+                    if is_bt {
+                        continue;
+                    }
+                    if !mask_needs(active_mix_mask, &known_normals, now) {
+                        if let Some(mix_id) = mix_stream.take() {
+                            let _ = mixer.flush_stream(mix_id);
+                        }
+                    } else if active_mix_mask & (1u64 << (header.origin % 64)) != 0 {
+                        continue;
+                    }
+                }
+                let mix_takeover = is_mix
+                    && peers
+                        .get(&key)
+                        .map(|peer| {
+                            peer.last_seen.elapsed() > CARRIER_STALL
+                                || peer.metrics.packets.load(Ordering::Relaxed) == 0
+                        })
+                        .unwrap_or(true);
+                if mix_takeover {
+                    for (other_key, other) in peers.iter() {
+                        if *other_key != key {
+                            let _ = mixer.flush_stream(other.id);
+                        }
+                    }
+                }
+
+                if !peers.contains_key(&key) {
+                    match create_peer(&mixer, &registry, key, addr, &header, &config) {
+                        Ok(peer) => {
+                            log::info!(
+                                "stream {} from {} ({}, origin {:016x}) joined",
+                                peer.id,
+                                addr,
+                                header.codec.as_str(),
+                                header.origin
+                            );
+                            peers.insert(key, peer);
+                        }
+                        Err(error) => {
+                            log::warn!("cannot accept stream from {addr}: {error}");
+                            continue;
+                        }
+                    }
+                }
+
+                let Some(peer) = peers.get_mut(&key) else {
+                    continue;
+                };
+                if !is_bt {
+                    peer.last_wifi_seen = now;
+                }
+                let tap_bt = is_bt
+                    && now.duration_since(peer.last_wifi_seen)
+                        > Duration::from_millis(300);
+
+                // Sequence bookkeeping: duplicate / reordering / loss.
+                //
+                // Dual-stack delivers the same frame twice (Wi-Fi + a delayed
+                // Bluetooth copy). Anything at or behind the newest delivered
+                // sequence is a duplicate and is dropped without touching the
+                // decoder; only a genuine sequence wrap (diff near -2^31)
+                // resynchronises. This keeps a stale Bluetooth backlog from
+                // rewinding the jitter buffer.
+                const LATE_DUPLICATE_LIMIT: i32 = -250_000;
+                // A carrier switch can land far from the timeline the other
+                // carrier has been feeding (a relayed Bluetooth copy may lag
+                // the direct Wi-Fi copy by seconds, or jump ahead when Wi-Fi
+                // returns). Splicing that as loss would either zero-fill
+                // seconds of silence or drop the new carrier until it caught
+                // up. Resync instead: flush the queued audio and continue
+                // from the newly active carrier.
+                const CARRIER_RESYNC_FRAMES: i32 = 100;
+                // Only believe a lagging carrier once the active one has
+                // actually stopped: a relayed Bluetooth stream can sit
+                // hundreds of frames behind while Wi-Fi delivers normally,
+                // and accepting those stale bursts would make the timeline
+                // jump back and forth.
+                let is_bt = addr.ip().is_loopback();
+                let switched =
+                    is_bt != peer.last_path_bt || header.codec != peer.last_codec;
+                let stalled = peer.last_seen.elapsed() > CARRIER_STALL;
+                let mut gap = 0u32;
+                if let Some(last) = peer.last_seq {
+                    let diff = header.seq.wrapping_sub(last) as i32;
+                    if switched
+                        && diff.abs() > CARRIER_RESYNC_FRAMES
+                        && (diff > 0 || stalled)
+                    {
+                        log::info!(
+                            "udp: stream {} carrier switch {} -> {}, timeline {} {} frames",
+                            peer.id,
+                            if peer.last_path_bt { "bt" } else { "wifi" },
+                            if is_bt { "bt" } else { "wifi" },
+                            if diff > 0 { "skips" } else { "rewinds" },
+                            diff.unsigned_abs()
+                        );
+                        mixer.flush_stream(peer.id);
+                        peer.last_seq = None;
+                    } else if diff <= 0 {
+                        if diff > LATE_DUPLICATE_LIMIT {
+                            continue; // duplicate or reordered late packet
+                        }
+                        for decoder in peer.decoders.iter_mut().flatten() {
+                            decoder.reset();
+                        }
+                        peer.last_seq = None;
+                    } else if diff > 1 {
+                        gap = (diff - 1).min(20_000) as u32;
+                        static GAP_LOGS: std::sync::atomic::AtomicU64 =
+                            std::sync::atomic::AtomicU64::new(0);
+                        if gap > 50 && GAP_LOGS.fetch_add(1, Ordering::Relaxed) < 120 {
+                            log::warn!(
+                                "udp: seq gap {} -> {} ({} missing) from {} origin {:016x} stream {} codec {} {} B",
+                                last,
+                                header.seq,
+                                gap,
+                                addr,
+                                header.origin,
+                                header.stream_id,
+                                header.codec.as_str(),
+                                payload.len()
+                            );
+                        }
+                    }
+                }
+
+                let frame_frames = frames_for_ms(header.frame_ms as f32) as u32;
+                if gap > 0 {
+                    let lost = gap.saturating_mul(frame_frames);
+                    if header.codec == Codec::Opus {
+                        let concealed = peer.conceal(gap.min(MAX_PLC_PACKETS), frame_frames);
+                        peer.metrics
+                            .plc_frames
+                            .fetch_add(concealed as u64, Ordering::Relaxed);
+                        let remaining = gap.saturating_sub(MAX_PLC_PACKETS);
+                        if remaining > 0 {
+                            for decoder in peer.decoders.iter_mut().flatten() {
+                                decoder.reset();
+                            }
+                            peer.metrics.lost_frames.fetch_add(
+                                remaining as u64 * frame_frames as u64,
+                                Ordering::Relaxed,
+                            );
+                            peer.zero_fill(remaining.saturating_mul(frame_frames));
+                        }
+                    } else {
+                        peer.metrics
+                            .lost_frames
+                            .fetch_add(lost as u64, Ordering::Relaxed);
+                        peer.zero_fill(lost);
+                    }
+                }
+
+                // Advance the timeline before decoding: a decoder failure must
+                // not leave `last_seq` behind, or the next packet re-applies
+                // the same gap (zero-fill) on every arrival and the buffer
+                // fills with silence.
+                peer.last_seq = Some(header.seq);
+                match peer.deliver(payload, header.codec, config.mix_tap.as_deref(), tap_bt) {
+                    Ok(frames) => {
+                        let expected = frame_frames as usize;
+                        if frames != expected {
+                            static WARNED: std::sync::atomic::AtomicU64 =
+                                std::sync::atomic::AtomicU64::new(0);
+                            if WARNED.fetch_add(1, Ordering::Relaxed) < 8 {
+                                log::warn!(
+                                    "udp: stream {} decoded {} frames, expected {} (codec {:?}, payload {} B)",
+                                    peer.id,
+                                    frames,
+                                    expected,
+                                    header.codec,
+                                    payload.len()
+                                );
+                            }
+                        }
+                        peer.last_seen = Instant::now();
+                        peer.metrics.active.store(true, Ordering::Relaxed);
+                        peer.metrics.packets.fetch_add(1, Ordering::Relaxed);
+                        peer.metrics
+                            .last_packet_us
+                            .store(now_us(), Ordering::Relaxed);
+                        // The same logical stream may alternate carriers; show
+                        // whichever delivered the newest frame.
+                        let path = if addr.ip().is_loopback() {
+                            if addr.port() == config.bind.port() {
+                                "local"
+                            } else {
+                                "bt"
+                            }
+                        } else {
+                            "wifi"
+                        };
+                        if is_mix {
+                            last_mix_at = Instant::now();
+                            mix_stream = Some(peer.id);
+                            active_mix_mask = header.mix_mask;
+                        }
+                        peer.metrics.set_source(&addr.to_string(), path);
+                        peer.last_path_bt = addr.ip().is_loopback();
+                        peer.last_codec = header.codec;
+                        if peer.last_report.elapsed() >= Duration::from_secs(5) {
+                            peer.last_report = Instant::now();
+                            let m = &peer.metrics;
+                            log::info!(
+                                "udp: stream {} {} seq {} pkts {} lost {} resets {} underruns {} buffer {:.0} ms target {:.0} rms {:.1} dB",
+                                peer.id,
+                                if peer.last_path_bt { "bt" } else { "wifi" },
+                                header.seq,
+                                m.packets.load(Ordering::Relaxed),
+                                m.lost_frames.load(Ordering::Relaxed),
+                                m.buffer_resets.load(Ordering::Relaxed),
+                                m.underrun_blocks.load(Ordering::Relaxed),
+                                crate::format::ms_for_frames(
+                                    m.buffer_frames.load(Ordering::Relaxed) as usize
+                                ),
+                                f32::from_bits(m.target_ms.load(Ordering::Relaxed)),
+                                linear_to_db(f32::from_bits(m.rms.load(Ordering::Relaxed)))
+                            );
+                        }
+                        if addr.ip().is_loopback() {
+                            peer.bt_streak = peer.bt_streak.saturating_add(1);
+                            if !peer.bt_target_raised && peer.bt_streak >= BT_TARGET_STREAK {
+                                let target = target_now(&config).max(BT_STREAM_TARGET_MS);
+                                if mixer.set_stream_target_ms(peer.id, target) {
+                                    peer.bt_target_raised = true;
+                                    peer.bt_target_ms = target;
+                                    peer.last_underruns =
+                                        peer.metrics.underrun_blocks.load(Ordering::Relaxed);
+                                    peer.last_target_check = Instant::now();
+                                    peer.last_target_decay = Instant::now();
+                                    log::info!(
+                                        "stream {} is Bluetooth-only, buffer target {:.0} ms",
+                                        peer.id,
+                                        target
+                                    );
+                                }
+                            } else if peer.bt_target_raised {
+                                // Closed loop: Bluetooth dropouts show up as
+                                // underruns, so deepen the buffer until they
+                                // stop, then relax it once stable.
+                                if peer.last_target_check.elapsed() >= Duration::from_secs(10) {
+                                    let now_underruns =
+                                        peer.metrics.underrun_blocks.load(Ordering::Relaxed);
+                                    let delta = now_underruns
+                                        .saturating_sub(peer.last_underruns);
+                                    peer.last_underruns = now_underruns;
+                                    peer.last_target_check = Instant::now();
+                                    if delta >= 1 && peer.bt_target_ms < BT_MAX_TARGET_MS {
+                                        let target =
+                                            (peer.bt_target_ms + 50.0).min(BT_MAX_TARGET_MS);
+                                        if mixer.set_stream_target_ms(peer.id, target) {
+                                            peer.bt_target_ms = target;
+                                            log::info!(
+                                                "stream {} Bluetooth dropouts, buffer target {:.0} ms",
+                                                peer.id,
+                                                target
+                                            );
+                                        }
+                                        peer.last_target_decay = Instant::now();
+                                    } else if delta == 0
+                                        && peer.bt_target_ms > BT_STREAM_TARGET_MS
+                                        && peer.last_target_decay.elapsed()
+                                            >= Duration::from_secs(90)
+                                    {
+                                        let target =
+                                            (peer.bt_target_ms - 50.0).max(BT_STREAM_TARGET_MS);
+                                        if mixer.set_stream_target_ms(peer.id, target) {
+                                            peer.bt_target_ms = target;
+                                        }
+                                        peer.last_target_decay = Instant::now();
+                                    }
+                                }
+                            }
+                        } else if peer.bt_target_raised {
+                            // Wi-Fi is back: a lower target cuts latency again.
+                            peer.bt_target_raised = false;
+                            peer.bt_streak = 0;
+                            let _ = mixer.set_stream_target_ms(peer.id, target_now(&config));
+                        } else {
+                            peer.bt_streak = 0;
+                        }
+                    }
+                    Err(error) => {
+                        stats.bad_packets.fetch_add(1, Ordering::Relaxed);
+                        log::debug!("decode failed from {addr}: {error}");
+                    }
+                }
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            Err(error) => {
+                log::warn!("udp receive error: {error}");
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        let now = Instant::now();
+        peers.retain(|key, peer| {
+            // RFCOMM stalls for seconds; retire a Bluetooth-carried stream
+            // only after a much longer silence so a stall does not destroy
+            // the jitter buffer state (which would cause an audible jump).
+            let timeout = if peer.last_path_bt {
+                BT_PEER_TIMEOUT
+            } else {
+                PEER_TIMEOUT
+            };
+            let alive = now.duration_since(peer.last_seen) < timeout;
+            if !alive {
+                peer.metrics.active.store(false, Ordering::Relaxed);
+                mixer.remove(peer.id);
+                registry.remove(peer.id);
+                stats.timeouts.fetch_add(1, Ordering::Relaxed);
+                log::info!("stream {} ({key:?}) timed out", peer.id);
+            }
+            alive
+        });
+    }
+}
+
+fn create_peer(
+    mixer: &MixerControl,
+    registry: &Arc<MetricsRegistry>,
+    key: PeerKey,
+    addr: SocketAddr,
+    header: &FrameHeader,
+    config: &ReceiverConfig,
+) -> Result<Peer> {
+    if config.max_streams == 0 {
+        return Err(CoreError::InvalidArgument("max_streams is zero".into()));
+    }
+    if registry.len() >= config.max_streams {
+        return Err(CoreError::Backend(format!(
+            "stream limit reached ({})",
+            config.max_streams
+        )));
+    }
+    let id = stream_key(&key);
+    let label = if header.origin == 0 {
+        peer_label(&addr, header.stream_id)
+    } else {
+        format!("{:016x}#{}", header.origin, header.stream_id)
+    };
+    let base_target = target_now(config);
+    let metrics = Arc::new(StreamMetrics::new(
+        id,
+        header.origin,
+        header.stream_id,
+        label,
+        addr.to_string(),
+        header.codec,
+        base_target,
+    ));
+    let bt_carrier = addr.ip().is_loopback();
+    let target_ms = if bt_carrier {
+        base_target.max(BT_STREAM_TARGET_MS)
+    } else {
+        base_target
+    };
+    let metrics = {
+        store_f32(&metrics.target_ms, target_ms);
+        metrics
+    };
+    let (producer, consumer) = rtrb::RingBuffer::new(PEER_RING_SAMPLES);
+    let channel = StreamChannel::new(metrics.clone(), consumer, target_ms);
+    if !mixer.add(channel) {
+        return Err(CoreError::Backend("mixer command queue is full".into()));
+    }
+    registry.add(metrics.clone());
+    // Slot by codec id: a stream may be discovered on the Bluetooth carrier
+    // (Opus) and later receive Wi-Fi copies (raw). Putting the first decoder
+    // in slot 0 regardless of its codec made every later raw packet decode
+    // with the Opus decoder and fail.
+    let mut decoders: [Option<AudioDecoder>; 2] = [None, None];
+    decoders[header.codec as usize] = Some(AudioDecoder::new(header.codec)?);
+    Ok(Peer {
+        id,
+        origin: header.origin,
+        codec: header.codec,
+        producer,
+        decoders,
+        last_seq: None,
+        last_seen: Instant::now(),
+        metrics,
+        zero_buf: vec![0.0; frames_for_ms(MAX_GAP_FILL_MS) * CHANNELS],
+        bt_streak: if bt_carrier { 1 } else { 0 },
+        last_path_bt: bt_carrier,
+        last_wifi_seen: if bt_carrier {
+            Instant::now() - Duration::from_secs(5)
+        } else {
+            Instant::now()
+        },
+        last_codec: header.codec,
+        bt_target_raised: bt_carrier,
+        bt_target_ms: target_ms,
+        analyzer: SpectrumAnalyzer::new(),
+        last_underruns: 0,
+        last_target_check: Instant::now(),
+        last_target_decay: Instant::now(),
+        last_report: Instant::now(),
+    })
+}
+
+fn stream_key(key: &PeerKey) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    key.hash(&mut hasher);
+    // Keep the id inside i64 so JSON/Dart can round-trip it exactly.
+    hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF
+}
+
+/// Sender-side stream identity is independent from the connection address, so
+/// two senders behind the same NAT still map to distinct channels.
+pub fn peer_label(addr: &SocketAddr, stream_id: u16) -> String {
+    format!("{addr}#{stream_id}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dsp::new_mixer;
+    use crate::format::frames_for_ms;
+
+    #[test]
+    fn dual_path_duplicate_is_mixed_once() {
+        let (mixer, handle) = new_mixer(8);
+        let control = MixerControl::new(handle);
+        let receiver = spawn(
+            ReceiverConfig {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                target_ms: 50.0,
+                max_streams: 8,
+                live_target_ms: None,
+                mix_tap: None,
+            },
+            control,
+        )
+        .expect("receiver");
+
+        let first = UdpSocket::bind("127.0.0.1:0").expect("socket a");
+        let second = UdpSocket::bind("127.0.0.1:0").expect("socket b");
+        let frames = frames_for_ms(5.0);
+        let mut datagram =
+            FrameHeader::new(Codec::RawF32, 5, 77, 1, now_us(), 0xABCD_1234).encode().to_vec();
+        for _ in 0..frames * CHANNELS {
+            datagram.extend_from_slice(&0.1f32.to_le_bytes());
+        }
+
+        // The same frame arrives over both carriers: identical origin, stream
+        // and sequence, different sockets (Wi-Fi peer vs. local BT tunnel).
+        first
+            .send_to(&datagram, receiver.local_addr)
+            .expect("send wifi");
+        second
+            .send_to(&datagram, receiver.local_addr)
+            .expect("send bt");
+        std::thread::sleep(Duration::from_millis(300));
+
+        let snapshots = receiver.registry.snapshots();
+        assert_eq!(snapshots.len(), 1, "one logical stream, not two carriers");
+        assert_eq!(snapshots[0].packets, 1, "duplicate copy dropped");
+        assert!(snapshots[0].id > 0);
+        receiver.stop();
+        drop(mixer);
+    }
+
+    #[test]
+    fn bluetooth_carrier_shares_primary_sequence() {
+        let pcm = vec![0.1f32; frames_for_ms(5.0) * CHANNELS];
+        let mut wifi = FramePacker::new(Codec::RawF32, 5, 0xABC).expect("wifi packer");
+        let mut bt = FramePacker::with_stream(
+            Codec::Opus,
+            5,
+            0xABC,
+            wifi.stream_id(),
+            Some(32_000),
+        )
+        .expect("bt packer");
+        // Let the primary run ahead, as it does while the tunnel is still
+        // connecting. The secondary must adopt the primary's sequence rather
+        // than counting on its own.
+        for _ in 0..37 {
+            wifi.build(&pcm).expect("wifi frame");
+        }
+        for _ in 0..5 {
+            let seq = wifi.next_seq();
+            wifi.build(&pcm).expect("wifi frame");
+            let packet = bt.build_compact_with_seq(&pcm, seq).expect("bt frame");
+            let (header, _) = FrameHeader::decode(packet).expect("decode");
+            assert_eq!(header.seq, seq);
+            assert_eq!(header.stream_id, wifi.stream_id());
+            assert_eq!(header.origin, 0xABC);
+        }
+        assert_eq!(bt.next_seq(), 0, "secondary counter must not advance");
+    }
+
+    #[test]
+    fn opus_first_stream_accepts_raw_later() {
+        let (mixer, handle) = new_mixer(8);
+        let control = MixerControl::new(handle);
+        let receiver = spawn(
+            ReceiverConfig {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                target_ms: 50.0,
+                max_streams: 8,
+                live_target_ms: None,
+                mix_tap: None,
+            },
+            control,
+        )
+        .expect("receiver");
+        let socket = UdpSocket::bind("127.0.0.1:0").expect("socket");
+        let frames = frames_for_ms(5.0);
+        let pcm = vec![0.1f32; frames * CHANNELS];
+
+        // First contact over the Bluetooth carrier: Opus.
+        let mut encoder =
+            AudioEncoder::with_bitrate(Codec::Opus, Some(32_000)).expect("opus encoder");
+        let mut opus = Vec::new();
+        encoder.encode(&pcm, &mut opus).expect("encode");
+        let mut bt = FrameHeader::new(Codec::Opus, 5, 7, 1, now_us(), 0x1234)
+            .encode_compact()
+            .to_vec();
+        bt.extend_from_slice(&opus);
+        socket.send_to(&bt, receiver.local_addr).expect("send bt");
+
+        // The next frame arrives over Wi-Fi as raw: the peer must pick a raw
+        // decoder, not reuse the Opus one from the first packet.
+        let mut raw = FrameHeader::new(Codec::RawF32, 5, 7, 2, now_us(), 0x1234)
+            .encode()
+            .to_vec();
+        for _ in 0..frames * CHANNELS {
+            raw.extend_from_slice(&0.1f32.to_le_bytes());
+        }
+        socket.send_to(&raw, receiver.local_addr).expect("send wifi");
+        std::thread::sleep(Duration::from_millis(300));
+
+        let snapshots = receiver.registry.snapshots();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].packets, 2, "both carriers decoded");
+        assert_eq!(snapshots[0].lost_frames, 0);
+        receiver.stop();
+        drop(mixer);
+    }
+
+    #[test]
+    fn decode_failure_does_not_repeat_gap() {
+        let (mixer, handle) = new_mixer(8);
+        let control = MixerControl::new(handle);
+        let receiver = spawn(
+            ReceiverConfig {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                target_ms: 50.0,
+                max_streams: 8,
+                live_target_ms: None,
+                mix_tap: None,
+            },
+            control,
+        )
+        .expect("receiver");
+        let socket = UdpSocket::bind("127.0.0.1:0").expect("socket");
+        let frames = frames_for_ms(5.0);
+        let mut bad = FrameHeader::new(Codec::RawF32, 5, 9, 1, now_us(), 0x5555)
+            .encode()
+            .to_vec();
+        bad.extend_from_slice(&[1, 2, 3]);
+        socket.send_to(&bad, receiver.local_addr).expect("send bad");
+        let mut good = FrameHeader::new(Codec::RawF32, 5, 9, 2, now_us(), 0x5555)
+            .encode()
+            .to_vec();
+        for _ in 0..frames * CHANNELS {
+            good.extend_from_slice(&0.1f32.to_le_bytes());
+        }
+        socket.send_to(&good, receiver.local_addr).expect("send good");
+        std::thread::sleep(Duration::from_millis(300));
+
+        let snapshots = receiver.registry.snapshots();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].packets, 1);
+        assert_eq!(
+            snapshots[0].lost_frames, 0,
+            "a failed decode must still advance the sequence"
+        );
+        receiver.stop();
+        drop(mixer);
+    }
+
+    #[test]
+    fn carrier_switch_resyncs_instead_of_zero_filling() {
+        fn raw_packet(seq: u32, stream: u16, origin: u64, frames: usize) -> Vec<u8> {
+            let mut packet =
+                FrameHeader::new(Codec::RawF32, 5, stream, seq, now_us(), origin)
+                    .encode()
+                    .to_vec();
+            for _ in 0..frames * CHANNELS {
+                packet.extend_from_slice(&0.1f32.to_le_bytes());
+            }
+            packet
+        }
+        fn opus_packet(seq: u32, stream: u16, origin: u64, frames: usize) -> Vec<u8> {
+            let pcm = vec![0.1f32; frames * CHANNELS];
+            let mut encoder =
+                AudioEncoder::with_bitrate(Codec::Opus, Some(32_000)).expect("encoder");
+            let mut opus = Vec::new();
+            encoder.encode(&pcm, &mut opus).expect("encode");
+            let mut packet = FrameHeader::new(Codec::Opus, 5, stream, seq, now_us(), origin)
+                .encode_compact()
+                .to_vec();
+            packet.extend_from_slice(&opus);
+            packet
+        }
+
+        let (mixer, handle) = new_mixer(8);
+        let control = MixerControl::new(handle);
+        let receiver = spawn(
+            ReceiverConfig {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                target_ms: 50.0,
+                max_streams: 8,
+                live_target_ms: None,
+                mix_tap: None,
+            },
+            control,
+        )
+        .expect("receiver");
+        let socket = UdpSocket::bind("127.0.0.1:0").expect("socket");
+        let frames = frames_for_ms(5.0);
+
+        // Wi-Fi frame 100, then the Bluetooth carrier jumps ahead to 400:
+        // the switch must resync, not zero-fill 300 frames.
+        socket
+            .send_to(&raw_packet(100, 3, 0xCAFE, frames), receiver.local_addr)
+            .expect("wifi");
+        socket
+            .send_to(&opus_packet(400, 3, 0xCAFE, frames), receiver.local_addr)
+            .expect("bt ahead");
+        std::thread::sleep(Duration::from_millis(250));
+        let snapshots = receiver.registry.snapshots();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].packets, 2);
+        assert_eq!(
+            snapshots[0].lost_frames, 0,
+            "a carrier jump must not be treated as packet loss"
+        );
+
+        // A stale Bluetooth burst while Wi-Fi keeps flowing must be dropped,
+        // not resynced: otherwise the timeline jumps back on every burst.
+        socket
+            .send_to(&raw_packet(900, 5, 0xD00D, frames), receiver.local_addr)
+            .expect("wifi live");
+        socket
+            .send_to(&opus_packet(120, 5, 0xD00D, frames), receiver.local_addr)
+            .expect("bt stale");
+        std::thread::sleep(Duration::from_millis(150));
+        let snapshots = receiver.registry.snapshots();
+        let stale = snapshots
+            .iter()
+            .find(|snapshot| snapshot.label.contains("d00d"))
+            .expect("third stream");
+        assert_eq!(stale.packets, 1, "stale relay copy dropped");
+        assert_eq!(stale.lost_frames, 0);
+
+        // When Wi-Fi actually stops, the lagging Bluetooth carrier is the
+        // only path left: accept it and resync after the stall window.
+        socket
+            .send_to(&raw_packet(900, 4, 0xBEEF, frames), receiver.local_addr)
+            .expect("wifi 2");
+        std::thread::sleep(Duration::from_millis(250));
+        socket
+            .send_to(&opus_packet(120, 4, 0xBEEF, frames), receiver.local_addr)
+            .expect("bt behind");
+        std::thread::sleep(Duration::from_millis(250));
+        let snapshots = receiver.registry.snapshots();
+        let second = snapshots
+            .iter()
+            .find(|snapshot| snapshot.label.contains("beef"))
+            .expect("second stream");
+        assert_eq!(second.packets, 2);
+        assert_eq!(second.lost_frames, 0);
+        receiver.stop();
+        drop(mixer);
+    }
+
+    #[test]
+    fn mix_tap_keeps_newest_samples_and_excludes_destination() {
+        let tap = MixTap::new();
+        tap.push(0xAA, &vec![1.0f32; 960], 960, false);
+        tap.push(0xBB, &vec![2.0f32; 960], 960, true);
+        let snapshot = tap.snapshot(960, 0xAA, Duration::from_secs(1));
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].0, 0xBB);
+        tap.push(0xAA, &vec![3.0f32; 20], 960, false);
+        let snapshot = tap.snapshot(960, 0, Duration::from_secs(1));
+        let block = snapshot
+            .iter()
+            .find(|(origin, _, _)| *origin == 0xAA)
+            .expect("origin");
+        assert_eq!(block.1.len(), 960);
+        assert_eq!(block.1[959], 3.0);
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(tap.snapshot(960, 0, Duration::from_millis(5)).is_empty());
+    }
+
+    #[test]
+    fn hub_mix_yields_to_live_wifi_and_takes_over_when_it_stops() {
+        fn lan_ip() -> Option<std::net::IpAddr> {
+            let probe = UdpSocket::bind("0.0.0.0:0").ok()?;
+            probe.connect("8.8.8.8:80").ok()?;
+            let ip = probe.local_addr().ok()?.ip();
+            if ip.is_loopback() {
+                None
+            } else {
+                Some(ip)
+            }
+        }
+        let Some(ip) = lan_ip() else {
+            return;
+        };
+        let (mixer, handle) = new_mixer(8);
+        let control = MixerControl::new(handle);
+        let receiver = spawn(
+            ReceiverConfig {
+                bind: "0.0.0.0:0".parse().unwrap(),
+                target_ms: 50.0,
+                max_streams: 8,
+                live_target_ms: None,
+                mix_tap: None,
+            },
+            control,
+        )
+        .expect("receiver");
+        let port = receiver.local_addr.port();
+        let wifi = UdpSocket::bind(format!("{ip}:0")).expect("wifi socket");
+        let bt = UdpSocket::bind("127.0.0.1:0").expect("bt socket");
+        let frames = frames_for_ms(5.0);
+        let normal = |seq: u32, stream: u16, origin: u64| {
+            let mut packet = FrameHeader::new(Codec::RawF32, 5, stream, seq, now_us(), origin)
+                .encode()
+                .to_vec();
+            for _ in 0..frames * CHANNELS {
+                packet.extend_from_slice(&0.1f32.to_le_bytes());
+            }
+            packet
+        };
+        let mask = (1u64 << (0xAAAu64 % 64))
+            | (1u64 << (0xBBBu64 % 64))
+            | (1u64 << (0xCCCu64 % 64));
+        let mix_packet = |seq: u32| {
+            let mut packet = FrameHeader::new(
+                Codec::RawF32,
+                5,
+                crate::protocol::MIX_STREAM_ID,
+                seq,
+                now_us(),
+                0xBBB,
+            )
+            .encode_mix(mask)
+            .to_vec();
+            for _ in 0..frames * CHANNELS {
+                packet.extend_from_slice(&0.1f32.to_le_bytes());
+            }
+            packet
+        };
+
+        // Three individual streams (A, hub B, C) over Wi-Fi.
+        for (stream, origin) in [(7u16, 0xAAAu64), (9, 0xBBB), (8, 0xCCC)] {
+            wifi.send_to(&normal(1, stream, origin), format!("{ip}:{port}"))
+                .expect("wifi normal");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(receiver.registry.snapshots().len(), 3);
+
+        // The mix covers all three and all are fresh: it must be ignored.
+        bt.send_to(&mix_packet(1), format!("127.0.0.1:{port}"))
+            .expect("mix while wifi");
+        std::thread::sleep(Duration::from_millis(80));
+        assert_eq!(
+            receiver.registry.snapshots().len(),
+            3,
+            "mix dropped while Wi-Fi is fresh"
+        );
+
+        // Wi-Fi gone: the mix takes over.
+        std::thread::sleep(Duration::from_millis(600));
+        bt.send_to(&mix_packet(2), format!("127.0.0.1:{port}"))
+            .expect("mix after wifi");
+        std::thread::sleep(Duration::from_millis(120));
+        let snapshots = receiver.registry.snapshots();
+        assert_eq!(snapshots.len(), 4, "mix accepted after Wi-Fi stops");
+        let mix = snapshots
+            .iter()
+            .find(|snapshot| snapshot.label.contains("#65520"))
+            .expect("mix stream");
+        assert_eq!(mix.packets, 1);
+        assert_eq!(mix.lost_frames, 0);
+
+        // One Wi-Fi stream returns while the mix is active: it is covered by
+        // the mix, so its frames must not play twice.
+        wifi.send_to(&normal(2, 7, 0xAAA), format!("{ip}:{port}"))
+            .expect("wifi A back");
+        std::thread::sleep(Duration::from_millis(80));
+        let snapshots = receiver.registry.snapshots();
+        let a = snapshots
+            .iter()
+            .find(|snapshot| snapshot.label.contains("aaa"))
+            .expect("A stream");
+        assert_eq!(a.packets, 1, "normal suppressed while mix covers it");
+
+        // Every covered stream is back: release the mix.
+        wifi.send_to(&normal(2, 9, 0xBBB), format!("{ip}:{port}"))
+            .expect("wifi B back");
+        wifi.send_to(&normal(2, 8, 0xCCC), format!("{ip}:{port}"))
+            .expect("wifi C back");
+        // The arriving packet that completes the covered set triggers the
+        // release; earlier covered copies were dropped, so one more tick each.
+        wifi.send_to(&normal(3, 7, 0xAAA), format!("{ip}:{port}"))
+            .expect("wifi A tick");
+        wifi.send_to(&normal(3, 9, 0xBBB), format!("{ip}:{port}"))
+            .expect("wifi B tick");
+        std::thread::sleep(Duration::from_millis(150));
+        let snapshots = receiver.registry.snapshots();
+        for (needle, expected) in [("aaa", 2), ("ccc", 2), ("bbb#", 2)] {
+            let stream = snapshots
+                .iter()
+                .find(|snapshot| snapshot.label.contains(needle) && !snapshot.label.contains("#65520"))
+                .expect("normal stream");
+            assert_eq!(stream.packets, expected, "{} after release", needle);
+        }
+        receiver.stop();
+        drop(mixer);
+    }
+
+    #[test]
+    fn different_origins_stay_separate() {
+        let (mixer, handle) = new_mixer(8);
+        let control = MixerControl::new(handle);
+        let receiver = spawn(
+            ReceiverConfig {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                target_ms: 50.0,
+                max_streams: 8,
+                live_target_ms: None,
+                mix_tap: None,
+            },
+            control,
+        )
+        .expect("receiver");
+        let socket = UdpSocket::bind("127.0.0.1:0").expect("socket");
+        let frames = frames_for_ms(5.0);
+        for (seq, origin) in [(1u32, 0x11u64), (2, 0x22)] {
+            let mut datagram = FrameHeader::new(Codec::RawF32, 5, 5, seq, now_us(), origin)
+                .encode()
+                .to_vec();
+            for _ in 0..frames * CHANNELS {
+                datagram.extend_from_slice(&0.1f32.to_le_bytes());
+            }
+            socket
+                .send_to(&datagram, receiver.local_addr)
+                .expect("send");
+        }
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(receiver.registry.snapshots().len(), 2);
+        receiver.stop();
+        drop(mixer);
+    }
+}
