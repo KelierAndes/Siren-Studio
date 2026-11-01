@@ -47,12 +47,22 @@ class StreamCard extends StatelessWidget {
                           channel.title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: NeuType.chrome(16.5, p.inkStrong, tracking: 1.2, w: FontWeight.w700),
+                          style: NeuType.chrome(
+                            16.5,
+                            p.inkStrong,
+                            tracking: 1.2,
+                            w: FontWeight.w700,
+                          ),
                         ),
                       ),
                       Tooltip(
                         message: '连接状态',
-                        child: NeuLed(palette: p, color: p.ledOn, on: channel.on, size: 8),
+                        child: NeuLed(
+                          palette: p,
+                          color: p.ledOn,
+                          on: channel.on,
+                          size: 8,
+                        ),
                       ),
                       const SizedBox(width: 7),
                       Tooltip(
@@ -65,7 +75,11 @@ class StreamCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 9),
-                      _MuteButton(palette: p, muted: channel.mute, onTap: channel.toggleMute),
+                      _MuteButton(
+                        palette: p,
+                        muted: channel.mute,
+                        onTap: channel.toggleMute,
+                      ),
                     ],
                   ),
                 ),
@@ -90,17 +104,28 @@ class StreamCard extends StatelessWidget {
                             SizedBox(
                               width: 108,
                               child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 children: [
                                   Text(
                                     channel.amountRange.min.toInt().toString(),
-                                    style: NeuType.chrome(9.5, p.inkFaint, tracking: .4),
+                                    style: NeuType.chrome(
+                                      9.5,
+                                      p.inkFaint,
+                                      tracking: .4,
+                                    ),
                                   ),
                                   Text(
                                     channel.amountRange.min < 0
                                         ? '+${channel.amountRange.max.toInt()}'
-                                        : channel.amountRange.max.toInt().toString(),
-                                    style: NeuType.chrome(9.5, p.inkFaint, tracking: .4),
+                                        : channel.amountRange.max
+                                              .toInt()
+                                              .toString(),
+                                    style: NeuType.chrome(
+                                      9.5,
+                                      p.inkFaint,
+                                      tracking: .4,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -108,20 +133,44 @@ class StreamCard extends StatelessWidget {
                             const SizedBox(height: 4),
                             Text(
                               '增益',
-                              style: NeuType.chrome(11, p.ink, tracking: 1.6, w: FontWeight.w700),
+                              style: NeuType.chrome(
+                                11,
+                                p.ink,
+                                tracking: 1.6,
+                                w: FontWeight.w700,
+                              ),
                             ),
                           ],
                         ),
                       ),
                       const SizedBox(width: 6),
-                      SizedBox(
-                        width: 92,
-                        child: Column(
-                          children: [
-                            _LevelWindow(palette: p, db: channel.rmsDb, accent: channel.accentFor(p)),
-                            const SizedBox(height: 8),
-                            Expanded(child: _Facts(palette: p, channel: channel)),
-                          ],
+                      // 桌面卡窄，电平窗与事实条上下排；手机卡宽，改成左右排。
+                      Expanded(
+                        child: LayoutBuilder(
+                          builder: (context, box) {
+                            final window = _LevelWindow(
+                              palette: p,
+                              db: channel.rmsDb,
+                              accent: channel.accentFor(p),
+                            );
+                            final facts = _Facts(palette: p, channel: channel);
+                            if (box.maxWidth >= 190) {
+                              return Row(
+                                children: [
+                                  SizedBox(width: 104, child: window),
+                                  const SizedBox(width: 8),
+                                  Expanded(child: facts),
+                                ],
+                              );
+                            }
+                            return Column(
+                              children: [
+                                SizedBox(height: 104, child: window),
+                                const SizedBox(height: 8),
+                                Expanded(child: facts),
+                              ],
+                            );
+                          },
                         ),
                       ),
                     ],
@@ -136,16 +185,20 @@ class StreamCard extends StatelessWidget {
   }
 
   static Color _healthColor(MetalPalette p, int health) => switch (health) {
-        0 => p.ledOn,
-        1 => p.orange,
-        2 => p.salmon,
-        _ => p.ledDim,
-      };
+    0 => p.ledOn,
+    1 => p.orange,
+    2 => p.salmon,
+    _ => p.ledDim,
+  };
 }
 
 /// 当前电平窗：数值 + 电平条，占参考图 LCD 小窗的位置。
 class _LevelWindow extends StatelessWidget {
-  const _LevelWindow({required this.palette, required this.db, required this.accent});
+  const _LevelWindow({
+    required this.palette,
+    required this.db,
+    required this.accent,
+  });
 
   final MetalPalette palette;
   final double db;
@@ -157,72 +210,83 @@ class _LevelWindow extends StatelessWidget {
     final barColor = norm > .94
         ? palette.salmon
         : norm > .8
-            ? palette.orange
-            : accent;
-    return SizedBox(
-      height: 104,
-      child: NeuWell(
-        radius: 10,
-        palette: palette,
-        deep: true,
-        padding: const EdgeInsets.fromLTRB(8, 8, 8, 9),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('当前电平', style: NeuType.chrome(9.5, palette.inkFaint, tracking: .4)),
-            const Spacer(),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.baseline,
-                textBaseline: TextBaseline.alphabetic,
+        ? palette.orange
+        : accent;
+    return NeuWell(
+      radius: 10,
+      palette: palette,
+      deep: true,
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 9),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '当前电平',
+            style: NeuType.chrome(9.5, palette.inkFaint, tracking: .4),
+          ),
+          const Spacer(),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text(
+                  db.toStringAsFixed(1),
+                  style: NeuType.numeric(22, barColor).copyWith(
+                    shadows: [
+                      Shadow(
+                        color: barColor.withValues(alpha: .45),
+                        blurRadius: 8,
+                      ),
+                    ],
+                  ),
+                ),
+                Text(
+                  ' dB',
+                  style: NeuType.chrome(
+                    10,
+                    barColor.withValues(alpha: .8),
+                    tracking: .6,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 7),
+          SizedBox(
+            height: 5,
+            child: LayoutBuilder(
+              builder: (context, box) => Stack(
                 children: [
-                  Text(
-                    db.toStringAsFixed(1),
-                    style: NeuType.numeric(22, barColor).copyWith(
-                      shadows: [Shadow(color: barColor.withValues(alpha: .45), blurRadius: 8)],
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: palette.bevel.withValues(alpha: .16),
+                        borderRadius: BorderRadius.circular(3),
+                      ),
                     ),
                   ),
-                  Text(
-                    ' dB',
-                    style: NeuType.chrome(10, barColor.withValues(alpha: .8), tracking: .6),
+                  Positioned(
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: box.maxWidth * norm,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [barColor.withValues(alpha: .5), barColor],
+                        ),
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                    ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 7),
-            SizedBox(
-              height: 5,
-              child: LayoutBuilder(
-                builder: (context, box) => Stack(
-                  children: [
-                    Positioned.fill(
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: palette.bevel.withValues(alpha: .16),
-                          borderRadius: BorderRadius.circular(3),
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      left: 0,
-                      top: 0,
-                      bottom: 0,
-                      width: box.maxWidth * norm,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(colors: [barColor.withValues(alpha: .5), barColor]),
-                          borderRadius: BorderRadius.circular(3),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -274,7 +338,11 @@ class _Facts extends StatelessWidget {
 
 /// 一键静音：圆形金属键 + 扬声器图标，静音时整键变红。
 class _MuteButton extends StatelessWidget {
-  const _MuteButton({required this.palette, required this.muted, required this.onTap});
+  const _MuteButton({
+    required this.palette,
+    required this.muted,
+    required this.onTap,
+  });
 
   final MetalPalette palette;
   final bool muted;
@@ -298,12 +366,17 @@ class _MuteButton extends StatelessWidget {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: muted
-                    ? [p.salmon.withValues(alpha: .95), p.salmon.withValues(alpha: .7)]
+                    ? [
+                        p.salmon.withValues(alpha: .95),
+                        p.salmon.withValues(alpha: .7),
+                      ]
                     : [p.moduleTop, p.moduleBottom],
               ),
               boxShadow: [
                 BoxShadow(
-                  color: muted ? p.salmon.withValues(alpha: .35) : p.bevel.withValues(alpha: .22),
+                  color: muted
+                      ? p.salmon.withValues(alpha: .35)
+                      : p.bevel.withValues(alpha: .22),
                   offset: const Offset(0, 1),
                   blurRadius: muted ? 6 : 2,
                 ),

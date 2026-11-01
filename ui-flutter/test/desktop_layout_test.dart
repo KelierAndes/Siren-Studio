@@ -70,7 +70,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('mobile cards fit their footer on every tab', (tester) async {
+  testWidgets('mobile chassis stacks the same cards without overflow', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -84,20 +84,21 @@ void main() {
           gainDb: 0,
           active: true,
         ),
-      ]);
+      ])
+      ..setJoined(true)
+      ..setStatusText('组网中 · 2 台');
+    model.channels[0].setFacts(rms: -15.5, path: 'Wi-Fi', lost: 0, under: 0, health: 0);
 
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(
-          body: MobileDevice(model: model, size: MobileDevice.design),
-        ),
+        home: Scaffold(body: MobileDevice(model: model, size: MobileDevice.design)),
       ),
     );
-    for (var tab = 0; tab < 4; tab++) {
-      model.setMobileModule(tab);
-      await tester.pump(const Duration(milliseconds: 40));
-      expect(tester.takeException(), isNull, reason: 'mobile tab $tab');
-    }
+    await tester.pump(const Duration(milliseconds: 40));
+    expect(tester.takeException(), isNull);
+    expect(find.text('本机'), findsOneWidget);
+    expect(find.text('组网'), findsOneWidget);
+    expect(find.text('当前电平'), findsNWidgets(2));
+    expect(find.text('BYPASS'), findsOneWidget);
   });
-
 }

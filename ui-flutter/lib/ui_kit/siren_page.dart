@@ -9,7 +9,6 @@ import 'controls.dart';
 import 'device.dart';
 import 'mobile_device.dart';
 import 'siren_binding.dart';
-import 'siren_settings.dart';
 import 'theme.dart';
 
 /// Siren host for the BASSMAKER-derived hardware panel.
@@ -24,20 +23,7 @@ class SirenPage extends StatefulWidget {
 }
 
 class _SirenPageState extends State<SirenPage> {
-  late final SirenBinding _binding;
-
-  @override
-  void initState() {
-    super.initState();
-    _binding = SirenBinding(widget.model);
-    _binding.onRequestJoin = _openSettings;
-    _binding.onRequestSettings = _openSettings;
-  }
-
-  void _openSettings() {
-    if (!mounted) return;
-    showSirenSettings(context, _binding);
-  }
+  late final SirenBinding _binding = SirenBinding(widget.model);
 
   @override
   void dispose() {

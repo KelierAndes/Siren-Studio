@@ -1154,3 +1154,100 @@ class _FaderPainter extends CustomPainter {
   @override
   bool shouldRepaint(_FaderPainter old) => old.t != t || old.accent != accent || old.palette != palette;
 }
+
+class IconButton32 extends StatefulWidget {
+  const IconButton32({
+    super.key,
+    required this.palette,
+    required this.icon,
+    required this.onTap,
+    this.size = 32,
+  });
+
+  final MetalPalette palette;
+  final IconData icon;
+  final VoidCallback onTap;
+  final double size;
+
+  @override
+  State<IconButton32> createState() => _IconButton32State();
+}
+
+class _IconButton32State extends State<IconButton32> {
+  bool _down = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (_) => setState(() => _down = true),
+      onTapCancel: () => setState(() => _down = false),
+      onTapUp: (_) => setState(() => _down = false),
+      onTap: widget.onTap,
+      child: SizedBox(
+        width: widget.size,
+        height: widget.size,
+        child: CustomPaint(
+          painter: _IconBtnPainter(palette: widget.palette, down: _down),
+          child: Icon(
+            widget.icon,
+            size: widget.size * .58,
+            color: _down ? widget.palette.cyan : widget.palette.ink,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _IconBtnPainter extends CustomPainter {
+  _IconBtnPainter({required this.palette, required this.down});
+
+  final MetalPalette palette;
+  final bool down;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(9));
+    if (down) {
+      canvas.drawRRect(r, Paint()..color = palette.stripTint);
+      canvas.save();
+      canvas.clipRRect(r);
+      canvas.drawRRect(
+        r.shift(const Offset(0, 1.6)),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 6
+          ..color = palette.shade(.8)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+      );
+      canvas.restore();
+    } else {
+      canvas.drawRRect(
+        r.shift(const Offset(0, 3)),
+        Paint()
+          ..color = palette.shade(.6)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
+      );
+      canvas.drawRRect(
+        r,
+        Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [palette.moduleTop, palette.moduleBottom],
+          ).createShader(Offset.zero & size),
+      );
+      canvas.drawRRect(
+        r,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1
+          ..color = palette.bevel.withValues(alpha: .5),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_IconBtnPainter old) => old.down != down || old.palette != palette;
+}

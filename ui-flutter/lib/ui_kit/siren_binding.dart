@@ -28,9 +28,6 @@ class SirenBinding {
   final AppModel app;
   final ShaperModel visual;
 
-  VoidCallback? onRequestJoin;
-  VoidCallback? onRequestSettings;
-
   bool _syncing = false;
   double _lastAudibleGain = 0;
   int _lastPage = 0;
@@ -39,14 +36,6 @@ class SirenBinding {
   final Map<int, DateTime> _lastIssue = {};
 
   void _wire() {
-    visual.onPower = () {
-      if (app.meshRunning) {
-        app.stopMesh();
-      } else {
-        onRequestJoin?.call();
-      }
-    };
-    visual.onSettings = () => onRequestSettings?.call();
     visual.onNameChanged = (value) => app.nodeName = value;
     visual.onSourceChanged = (value) => app.lastSource = value;
     visual.onToneFreqChanged = (value) => app.lastFreq = value;
@@ -69,16 +58,6 @@ class SirenBinding {
         ),
       );
     };
-    visual.onNext = () => onRequestSettings?.call();
-    visual.onPrev = visual.toggleTheme;
-    visual.onHp = (value) {
-      if (_syncing) return;
-      app.setTargetMs(value);
-    };
-    visual.onLp = (value) {
-      if (_syncing) return;
-      app.setMasterGainDb(value);
-    };
     visual.onBypass = () {
       if (_syncing) return;
       final gain = app.masterGainDb;
@@ -97,40 +76,12 @@ class SirenBinding {
         final stream = _streamAt(i);
         if (stream != null) app.setStreamGain(stream.id, value);
       };
-      channel.onA = (value) {
-        if (_syncing) return;
-        app.setTargetMs(value);
-      };
-      channel.onB = (value) {
-        if (_syncing) return;
-        app.setMasterGainDb(value);
-      };
       channel.onMute = (muted) {
         if (_syncing) return;
         final stream = _streamAt(i);
         if (stream != null) app.setStreamMuted(stream.id, muted);
       };
     }
-
-    final node = visual.channels[2];
-    node.onAmount = (value) {
-      if (_syncing) return;
-      app.setMasterGainDb(value);
-    };
-    node.onA = (value) {
-      if (_syncing) return;
-      app.setTargetMs(value);
-    };
-    node.onB = (value) {
-      if (_syncing) return;
-      app.lastFreq = value;
-    };
-
-    final link = visual.channels[3];
-    link.onAmount = (value) {
-      if (_syncing) return;
-      app.setTargetMs(value);
-    };
   }
 
   /// Stream shown in card [index] on the current page.
@@ -232,8 +183,6 @@ class SirenBinding {
 
       final target = (mesh?.center.targetMs ?? app.lastTargetMs).clamp(10.0, 500.0);
       final master = (mesh?.center.masterGainDb ?? app.lastMasterGainDb).clamp(-60.0, 12.0);
-      visual.setHp(target);
-      visual.setLp(master);
       visual.syncBypass(master <= -59);
 
       for (var i = 0; i < 2; i++) {
@@ -241,24 +190,12 @@ class SirenBinding {
         final stream = _streamAt(i);
         if (stream == null) {
           channel.setTitle('等待节点');
-          channel.setReadout('缓冲', '目标', '--', 'ms');
-          channel.setInfo('—', '—');
           channel.setFacts(rms: -60, path: '—', lost: 0, under: 0, health: 3);
           channel.syncAmount(-60);
           channel.syncMute(false);
           channel.syncOn(false);
         } else {
           channel.setTitle(mesh!.streamName(stream));
-          channel.setReadout(
-            '缓冲',
-            '目标',
-            '${stream.bufferMs.round()}/${stream.targetMs.round()}',
-            'ms',
-          );
-          channel.setInfo(
-            '${_pathLabel(stream.path)} · ${stream.codec.toUpperCase()}',
-            '${stream.lostFrames}',
-          );
           channel.setFacts(
             rms: stream.rmsDb,
             path: _pathLabel(stream.path),
@@ -266,24 +203,12 @@ class SirenBinding {
             under: stream.underruns,
             health: health[stream.id] ?? 3,
           );
-          channel.setFreq(stream.bufferMs.clamp(channel.freqRange.min, channel.freqRange.max));
           channel.syncAmount(stream.gainDb);
           channel.syncMute(stream.muted);
           channel.syncOn(stream.active);
         }
       }
 
-      final node = visual.channels[2];
-      node.setTitle('本机');
-      node.setReadout('音源', '输出', app.sourceLabel, '');
-      node.setInfo(app.lastOutput ? '本地播放' : '静默接收', '${app.lastFreq.round()} Hz');
-      node.setFreq(app.lastFreq);
-      node.syncAmount(master);
-      node.setA(target);
-      node.setB(app.lastFreq);
-      node.syncOn(running);
-
-      final link = visual.channels[3];
       final bt = mesh?.bt;
       final role = switch (bt?.role) {
         'hub' => '中心',
@@ -295,14 +220,6 @@ class SirenBinding {
         'connected' => '已连',
         _ => '等待',
       };
-      link.setTitle('组网');
-      link.setReadout('蓝牙', '链路', '$role/$state', '');
-      link.setInfo('$role · $state', bt == null ? '等待' : '${bt.links} 路');
-      link.syncAmount(target);
-      link.setFreq(target);
-      link.setA(bt == null ? 0 : (bt.links * 50.0).clamp(0, 400));
-      link.setB(bt?.channel.toDouble() ?? 16);
-      link.syncOn(running);
 
       final names = <String>[];
       for (final peer in [...?mesh?.peers, ...?mesh?.topology]) {

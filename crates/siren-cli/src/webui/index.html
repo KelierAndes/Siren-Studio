@@ -4,249 +4,306 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SirenStudio · 组网</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%234fd1c5'/%3E%3Cstop offset='1' stop-color='%2338bdf8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Cg stroke='%2304110f' stroke-width='4.2' stroke-linecap='round'%3E%3Cpath d='M14 32h3M21 22v20M28 14v36M35 24v16M42 28v8M49 32h1'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%234fd1c5'/%3E%3Cstop offset='1' stop-color='%2338bdf8'/%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Cg stroke='%2304110f' stroke-width='4.2' stroke-linecap='round'%3E%3Cpath d='M14 32h3M21 22v20M28 14v36M35 24v16M42 28v8M49 32h1'/%3E%3C/g%3E%3C/svg%3E">
 <style>
   :root {
-    /* Mirrors ui-flutter/lib/theme.dart so all three clients share one look. */
+    /* Mirrors ui-flutter/lib/ui_kit/theme.dart — the same chassis on all three clients. */
     --bg: #080d12;
-    --bg-soft: #0b1219;
-    --panel: #101a23;
+    --desk-top: #101820;
     --panel-2: #0b1219;
+    --metal-top: #1b2733;
+    --metal-bottom: #0e1720;
     --line: rgba(33, 52, 66, 0.9);
-    --line-strong: #213442;
     --text: #e7f1f8;
     --muted: #91a7b9;
     --muted-2: #5e7487;
     --teal: #4fd1c5;
-    --teal-dim: #1d8f7d;
     --blue: #38bdf8;
     --amber: #f5b84f;
+    --violet: #9b7cff;
     --red: #f87171;
-    --radius: 18px;
+    --green: #35d07f;
     --mono: Consolas, ui-monospace, "SFMono-Regular", monospace;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
   body {
     background:
-      radial-gradient(1100px 520px at 12% -10%, rgba(79, 209, 197, 0.10), transparent 60%),
-      radial-gradient(900px 480px at 105% 8%, rgba(56, 189, 248, 0.07), transparent 55%),
+      radial-gradient(1200px 620px at 18% -10%, var(--desk-top), transparent 62%),
+      radial-gradient(900px 520px at 105% 10%, rgba(56, 189, 248, .06), transparent 55%),
       var(--bg);
     color: var(--text);
     font: 14px/1.45 "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
-  .shell { max-width: 1120px; margin: 0 auto; padding: 26px 22px 48px; }
+  .shell { max-width: 1180px; margin: 0 auto; padding: 22px 20px 40px; }
 
-  header.top { display: flex; align-items: center; gap: 16px; margin-bottom: 22px; }
-  .logo {
-    width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center;
-    background: linear-gradient(135deg, var(--teal), var(--blue));
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.4), 0 10px 26px rgba(79,209,197,.28);
+  /* 顶栏：品牌 / 状态胶囊（含翻页箭头）/ 远端路数 */
+  .topbar { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+  .brand { font-size: 12px; letter-spacing: .34em; font-weight: 800; color: var(--muted); flex: 0 0 200px; }
+  .statuswrap { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; }
+  .statuspill {
+    display: inline-flex; align-items: center; gap: 9px; height: 32px; padding: 0 18px; min-width: 300px;
+    border-radius: 999px; font-size: 12.5px; letter-spacing: .06em; color: var(--text); background: var(--panel-2);
+    border: 1px solid rgba(255,255,255,.05);
+    box-shadow: inset 0 2px 6px rgba(0,0,0,.55), inset 0 -1px 0 rgba(255,255,255,.05);
+    white-space: nowrap;
   }
-  .logo svg { width: 23px; height: 23px; }
-  .logo svg [stroke] { stroke: #04110f; }
-  .brand h1 { margin: 0; font-size: 17px; letter-spacing: .26em; font-weight: 800; }
-  .brand p { margin: 3px 0 0; color: var(--muted-2); letter-spacing: .3em; font-size: 8.5px; }
-  .top-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
-  .pill {
-    display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px;
-    background: var(--panel); border: 1px solid var(--line); color: var(--muted);
-    font-size: 12.5px; white-space: nowrap;
-  }
-  .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted-2); }
-  .pill.on { color: #c8fff6; border-color: rgba(79,209,197,.35); background: rgba(79,209,197,.08); }
-  .pill.on .dot { background: var(--teal); box-shadow: 0 0 10px var(--teal); }
-  .pill.busy .dot { background: var(--amber); animation: blink 1s infinite; }
+  .statuspill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted-2); flex: 0 0 auto; }
+  .statuspill.on .dot { background: var(--green); box-shadow: 0 0 10px var(--green); }
+  .statuspill.busy .dot { background: var(--amber); animation: blink 1s infinite; }
   @keyframes blink { 50% { opacity: .25; } }
+  .nav {
+    width: 26px; height: 26px; border-radius: 9px; border: 1px solid var(--line); cursor: pointer;
+    background: linear-gradient(180deg, var(--metal-top), var(--metal-bottom));
+    color: var(--muted); font-size: 15px; line-height: 1;
+    box-shadow: 0 3px 8px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.07);
+  }
+  .nav:hover { color: var(--teal); }
+  .nav[hidden] { display: none; }
+  .remote { flex: 0 0 200px; text-align: right; font-size: 11px; letter-spacing: .1em; color: var(--muted-2); }
 
   .banner {
-    display: none; margin-bottom: 16px; padding: 12px 16px; border-radius: 14px;
-    border: 1px solid rgba(255,107,107,.35); background: rgba(255,107,107,.08);
-    color: #ffd0d0; font-size: 13px;
+    display: none; margin-bottom: 14px; padding: 11px 15px; border-radius: 13px;
+    border: 1px solid rgba(248,113,113,.35); background: rgba(248,113,113,.08); color: #ffd0d0; font-size: 12.5px;
   }
   .banner.show { display: block; }
 
-  .grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  /* 机箱 */
+  .chassis {
+    border-radius: 28px; padding: 16px;
+    background: linear-gradient(180deg, var(--metal-top), var(--metal-bottom));
+    box-shadow: 0 26px 60px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.08), inset 0 -1px 0 rgba(0,0,0,.4);
+    border: 1px solid rgba(255,255,255,.05);
+  }
+  .screen {
+    position: relative; height: 316px; border-radius: 16px; overflow: hidden; background: #05090d;
+    box-shadow: inset 0 3px 10px rgba(0,0,0,.85), inset 0 -1px 0 rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.05);
+  }
+  .screen canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  .rack { display: grid; grid-template-columns: 34px 1fr 1fr 444px 34px; gap: 10px; margin-top: 12px; align-items: stretch; }
+  .syscol { display: grid; grid-template-rows: 189px 66px; gap: 13px; min-width: 0; }
+  .sysrow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; min-width: 0; }
+
   .card {
-    background: linear-gradient(180deg, rgba(255,255,255,.02), transparent 40%), var(--panel);
-    border: 1px solid var(--line); border-radius: var(--radius);
-    box-shadow: 0 18px 44px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.035);
-    padding: 20px;
+    border-radius: 16px; padding: 12px 14px; min-width: 0;
+    background: linear-gradient(180deg, rgba(255,255,255,.035), transparent 38%), linear-gradient(180deg, var(--metal-top), var(--metal-bottom));
+    border: 1px solid rgba(255,255,255,.06);
+    box-shadow: 0 12px 26px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.09);
   }
-  .card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
-  .card-head .icon {
-    width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center;
-    background: rgba(52,224,191,.09); border: 1px solid rgba(52,224,191,.16);
+  .card.dim { opacity: .62; }
+  .well {
+    border-radius: 10px; background: rgba(4,9,13,.62);
+    box-shadow: inset 0 2px 6px rgba(0,0,0,.7), inset 0 -1px 0 rgba(255,255,255,.05);
+    border: 1px solid rgba(255,255,255,.04);
   }
-  .card-head h2 { margin: 0; font-size: 16px; letter-spacing: .02em; }
-  .card-head .sub { margin: 2px 0 0; color: var(--muted); font-size: 12.5px; }
-  .badge {
-    margin-left: auto; padding: 5px 10px; border-radius: 999px; font-size: 11px;
-    color: var(--muted); border: 1px solid var(--line); background: var(--panel-2);
+  .chead { display: flex; align-items: center; gap: 10px; height: 22px; }
+  .cname { font-size: 16.5px; font-weight: 800; letter-spacing: .05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .spacer { flex: 1; }
+  .led { width: 8px; height: 8px; border-radius: 50%; background: var(--muted-2); flex: 0 0 auto; }
+  .led.on { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .led.violet { background: var(--violet); box-shadow: 0 0 8px var(--violet); }
+  .led.good { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .led.warn { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+  .led.bad { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  .mutebtn {
+    width: 20px; height: 20px; border-radius: 50%; border: 1px solid rgba(255,255,255,.08); flex: 0 0 auto; padding: 0;
+    background: linear-gradient(180deg, var(--metal-top), var(--metal-bottom));
+    box-shadow: 0 2px 5px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.08);
+    color: var(--muted); cursor: pointer; display: grid; place-items: center;
   }
+  .mutebtn svg { width: 12px; height: 12px; }
+  .mutebtn.muted { background: linear-gradient(180deg, var(--red), rgba(248,113,113,.7)); color: #fff; box-shadow: 0 0 12px rgba(248,113,113,.45); }
 
-  label.field { display: block; margin-top: 18px; color: var(--muted); font-size: 12.5px; }
-  input[type="text"], input[type="number"] {
-    width: 100%; margin-top: 8px; padding: 13px 15px; border-radius: 13px;
-    background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
-    font: inherit; outline: none; transition: border-color .15s, box-shadow .15s;
+  /* 设备卡：单旋钮 + 电平窗 + 路径/丢帧/欠载 */
+  .dbody { display: flex; gap: 6px; margin-top: 8px; height: 200px; }
+  .knobcol { width: 112px; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .knob {
+    position: relative; width: 112px; height: 112px; border-radius: 50%; cursor: ns-resize; touch-action: none;
+    background: radial-gradient(circle at 50% 118%, rgba(0,0,0,.55), transparent 62%), linear-gradient(180deg, #223040, #131e28);
+    box-shadow: 0 10px 22px rgba(0,0,0,.5), inset 0 2px 0 rgba(255,255,255,.1), inset 0 -3px 8px rgba(0,0,0,.5);
+    border: 1px solid rgba(255,255,255,.07);
   }
-  input[type="text"]:focus, input[type="number"]:focus {
-    border-color: rgba(52,224,191,.5); box-shadow: 0 0 0 3px rgba(52,224,191,.10);
+  .knob::after {
+    content: ""; position: absolute; left: 50%; top: 50%; width: 3px; height: 42px; margin: -40px 0 0 -1.5px;
+    border-radius: 2px; background: var(--accent, var(--blue)); box-shadow: 0 0 9px var(--accent, var(--blue));
+    transform-origin: 50% 40px; transform: rotate(var(--rot, 0deg));
   }
-  .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 9px; }
+  .krange { width: 108px; display: flex; justify-content: space-between; margin-top: 2px; font-size: 9.5px; color: var(--muted-2); }
+  .klab { margin-top: 4px; font-size: 11px; font-weight: 700; letter-spacing: .16em; color: var(--muted); }
+  .dright { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .level { padding: 8px 9px; display: flex; flex-direction: column; justify-content: space-between; height: 100px; }
+  .level .lk { font-size: 9.5px; letter-spacing: .08em; color: var(--muted-2); }
+  .level .lv { font: 600 22px/1 var(--mono); color: var(--accent, var(--blue)); }
+  .level .lv i { font-style: normal; font-size: 10px; color: var(--muted); margin-left: 3px; }
+  .lbar { height: 5px; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; }
+  .lbar i { display: block; height: 100%; width: 0%; border-radius: 3px; background: linear-gradient(90deg, rgba(79,209,197,.5), var(--teal)); }
+  .facts { flex: 1; padding: 8px 9px; display: flex; flex-direction: column; justify-content: space-between; }
+  .fact { display: flex; align-items: baseline; gap: 6px; font-size: 9.5px; color: var(--muted-2); }
+  .fact b { margin-left: auto; font: 500 12px/1.15 var(--mono); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* 系统卡（无旋钮） */
+  .scard { display: flex; flex-direction: column; min-width: 0; }
+  .slabel { display: flex; align-items: baseline; font-size: 10px; font-weight: 700; color: var(--muted-2); margin-top: 9px; }
+  .svalue { margin-left: auto; font: 500 11.5px/1 var(--mono); color: var(--muted); }
+  input[type="text"] {
+    width: 100%; margin-top: 4px; padding: 8px 11px; border-radius: 8px; font: 600 13px/1.2 inherit;
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--text); outline: none;
+    box-shadow: inset 0 2px 5px rgba(0,0,0,.5);
+  }
+  input[type="text"]:focus { border-color: rgba(79,209,197,.5); box-shadow: inset 0 2px 5px rgba(0,0,0,.5), 0 0 0 3px rgba(79,209,197,.1); }
+  input[type="text"]:disabled, input[type="range"]:disabled { color: var(--muted); opacity: .6; }
+  .seg { display: flex; gap: 6px; margin-top: 4px; }
   .seg button {
-    padding: 14px 8px; border-radius: 14px; background: var(--panel-2);
-    border: 1px solid var(--line); color: var(--muted); font: inherit; cursor: pointer;
-    display: flex; align-items: center; justify-content: center; gap: 8px;
-    transition: all .15s;
+    padding: 7px 11px; border-radius: 999px; font: 600 10.5px/1 inherit; cursor: pointer; white-space: nowrap;
+    background: linear-gradient(180deg, var(--metal-top), var(--metal-bottom));
+    border: 1px solid rgba(255,255,255,.07); color: var(--muted-2);
+    box-shadow: 0 3px 8px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.07);
   }
-  .seg button:hover { border-color: var(--line-strong); color: var(--text); }
-  .seg button.active {
-    color: #c8fff6; border-color: rgba(79,209,197,.45);
-    background: linear-gradient(180deg, rgba(79,209,197,.14), rgba(79,209,197,.05));
+  .seg button.active { color: #d7fff8; border-color: rgba(79,209,197,.45); background: linear-gradient(180deg, rgba(79,209,197,.22), rgba(79,209,197,.06)); }
+  .seg button:disabled { opacity: .55; cursor: default; }
+  .readout { padding: 7px 9px; display: flex; flex-direction: column; justify-content: space-between; height: 48px; margin-top: 4px; }
+  .readout .fact b { font-size: 11.5px; }
+  .bigbtn {
+    margin-top: auto; height: 34px; border-radius: 999px; cursor: pointer; font: 700 13px/1 inherit; letter-spacing: .06em;
+    border: 1px solid rgba(255,255,255,.09); color: var(--text);
+    background: linear-gradient(180deg, rgba(79,209,197,.22), rgba(79,209,197,.05));
+    box-shadow: 0 4px 14px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.1);
   }
-  .row { display: flex; align-items: center; gap: 14px; }
-  .spread { justify-content: space-between; }
-  .switch-row {
-    display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    margin-top: 18px; padding: 4px 2px;
-  }
-  .switch { position: relative; width: 54px; height: 31px; flex: 0 0 auto; }
-  .switch input { opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
-  .switch .track {
-    position: absolute; inset: 0; border-radius: 999px; pointer-events: none;
-    background: #142126; border: 1px solid var(--line); transition: background .2s;
-  }
-  .switch .thumb {
-    position: absolute; top: 5px; left: 5px; width: 21px; height: 21px; border-radius: 50%;
-    background: #6b8085; pointer-events: none; transition: transform .2s, background .2s;
-  }
-  .switch input:checked ~ .track { background: rgba(79,209,197,.22); border-color: rgba(79,209,197,.4); }
-  .switch input:checked ~ .thumb { transform: translateX(23px); background: var(--teal); box-shadow: 0 0 12px rgba(79,209,197,.55); }
+  .bigbtn.leave { background: linear-gradient(180deg, rgba(248,113,113,.24), rgba(248,113,113,.06)); }
+  .bigbtn:disabled { opacity: .55; cursor: default; }
 
-  .primary {
-    width: 100%; margin-top: 22px; padding: 15px; border-radius: 11px; border: 0;
-    background: var(--teal); color: #04110f;
-    font: 700 13px/1 inherit; letter-spacing: .04em; cursor: pointer;
-    box-shadow: 0 10px 24px rgba(79,209,197,.22);
-    transition: transform .12s, filter .15s;
+  /* 底栏 */
+  .strip {
+    display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 14px;
+    background: linear-gradient(180deg, rgba(255,255,255,.02), transparent), var(--panel-2);
+    border: 1px solid rgba(255,255,255,.05); box-shadow: inset 0 2px 8px rgba(0,0,0,.5);
   }
-  .primary:hover { filter: brightness(1.05); }
-  .primary:active { transform: translateY(1px); }
-  .primary:disabled { filter: grayscale(.4) brightness(.75); cursor: default; }
-  .ghost {
-    padding: 11px 18px; border-radius: 11px; border: 1px solid rgba(248,113,113,.4);
-    background: rgba(255,107,107,.07); color: #ffb4b4; font: inherit; cursor: pointer;
-  }
-  .ghost:hover { background: rgba(255,107,107,.13); }
-
-  .hero { display: flex; align-items: baseline; gap: 12px; margin: 22px 0 0; }
-  .hero .value { font: 300 68px/1 var(--mono); letter-spacing: -.03em; }
-  .hero .unit { color: var(--muted); font-size: 14px; letter-spacing: .14em; }
-  .meter { height: 12px; border-radius: 999px; background: #0a1215; overflow: hidden; margin-top: 16px; border: 1px solid var(--line); }
-  .meter > i {
-    display: block; height: 100%; width: 0%;
-    background: linear-gradient(90deg, #2fcdb0, #9be36d 62%, #ffd166 84%, #ff6b6b);
-    transition: width .12s linear;
-  }
-  .meter.thin { height: 7px; margin-top: 10px; }
-
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 18px; }
-  .stat { background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
-  .stat .k { color: var(--muted); font-size: 11.5px; letter-spacing: .05em; }
-  .stat .v { margin-top: 5px; font: 600 19px/1.1 var(--mono); color: #d7fffa; }
-  .stat .v small { font: 500 11px var(--mono); color: var(--muted); margin-left: 3px; }
-
-  .slider-row { margin-top: 20px; }
-  .slider-row .head { display: flex; justify-content: space-between; color: var(--muted); font-size: 12.5px; }
-  .slider-row .head b { color: var(--teal); font: 600 13px var(--mono); }
-  input[type="range"] {
-    width: 100%; margin-top: 12px; -webkit-appearance: none; appearance: none; height: 6px;
-    border-radius: 999px; background: #16242a; outline: none; border: 1px solid var(--line);
+  .strip .sg { flex: 1; min-width: 0; }
+  .strip .seg { margin-top: 0; }
+  input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 22px; margin: 5px 0 0; background: transparent; cursor: pointer; }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 5px; border-radius: 3px;
+    background: linear-gradient(90deg, var(--accent, var(--teal)) var(--fill, 50%), rgba(255,255,255,.09) var(--fill, 50%));
+    box-shadow: inset 0 1px 3px rgba(0,0,0,.6);
   }
   input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%;
-    background: var(--teal); border: 0; cursor: pointer;
-    box-shadow: 0 0 0 5px rgba(52,224,191,.10), 0 3px 10px rgba(0,0,0,.5);
+    -webkit-appearance: none; width: 16px; height: 16px; margin-top: -6px; border-radius: 5px;
+    background: linear-gradient(180deg, #2a3a4b, #16212c); border: 1px solid rgba(255,255,255,.12);
+    box-shadow: 0 3px 7px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.16);
   }
-  input[type="range"]::-moz-range-thumb {
-    width: 20px; height: 20px; border-radius: 50%; background: var(--teal);
-    border: 0; cursor: pointer;
-  }
+  input[type="range"]::-moz-range-track { height: 5px; border-radius: 3px; background: rgba(255,255,255,.09); }
+  input[type="range"]::-moz-range-thumb { width: 15px; height: 15px; border-radius: 5px; background: #223040; border: 1px solid rgba(255,255,255,.12); }
 
-  .section-label { color: var(--muted); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; margin: 26px 0 10px; }
-  .peer {
-    display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px;
-    background: var(--panel-2); border: 1px solid var(--line); margin-top: 8px;
-  }
-  .peer .avatar {
-    width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center;
-    background: rgba(56,189,248,.09); border: 1px solid rgba(56,189,248,.18); color: #9ed8ff;
-  }
-  .peer .name { font-size: 13.5px; }
-  .peer .addr { color: var(--muted-2); font: 11.5px var(--mono); margin-top: 2px; }
-  .peer .online { margin-left: auto; color: var(--teal); font-size: 11.5px; display: flex; align-items: center; gap: 6px; }
-  .peer .online i { width: 6px; height: 6px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 8px var(--teal); }
+  /* IN / OUT 竖排电平 */
+  .fader { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .fader .track { position: relative; flex: 1; width: 12px; border-radius: 6px; background: rgba(4,9,13,.7); box-shadow: inset 0 2px 5px rgba(0,0,0,.7); overflow: hidden; }
+  .fader .track i { position: absolute; left: 0; right: 0; bottom: 0; height: 0%; background: linear-gradient(180deg, var(--accent, var(--teal)), rgba(79,209,197,.3)); }
+  .fader .lab { font-size: 11px; font-weight: 700; letter-spacing: .18em; color: var(--muted); }
+  .fader .num { font: 500 10.5px/1 var(--mono); color: var(--accent, var(--teal)); }
 
-  .stream { padding: 16px; border-radius: 14px; background: var(--panel-2); border: 1px solid var(--line); margin-top: 10px; }
-  .stream .sname { color: var(--text); font-size: 13px; font-weight: 700; margin-bottom: 10px; }
-  .stream .top { display: flex; align-items: center; gap: 10px; }
-  .stream .tag {
-    font: 10.5px var(--mono); letter-spacing: .06em; padding: 3px 8px; border-radius: 6px;
-    background: rgba(56,189,248,.10); color: #9ed8ff; border: 1px solid rgba(56,189,248,.18);
-  }
-  .stream .tag.live { background: rgba(79,209,197,.08); color: #b8f5eb; border-color: rgba(79,209,197,.2); }
-  .stream .level { margin-left: auto; font: 600 13px var(--mono); color: var(--muted); }
-  .stream .foot { display: flex; align-items: center; gap: 18px; margin-top: 12px; color: var(--muted-2); font-size: 11.5px; }
-  .stream .foot .grow { flex: 1; }
-  .mute {
-    border: 1px solid var(--line); background: transparent; color: var(--muted);
-    width: 34px; height: 34px; border-radius: 10px; cursor: pointer; display: grid; place-items: center;
-  }
-  .mute.off { color: var(--red); border-color: rgba(255,107,107,.4); background: rgba(255,107,107,.08); }
-  .stream .gainline { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
-  .stream .gainline input[type="range"] { flex: 1; }
-  .stream .gainline b { min-width: 62px; text-align: right; font: 600 12px var(--mono); color: var(--teal); }
+  .version { margin-top: 14px; text-align: center; font-size: 8.5px; letter-spacing: .3em; color: var(--muted-2); }
 
-  .meta { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 18px; color: var(--muted-2); font: 11.5px var(--mono); }
-  .empty { color: var(--muted-2); font-size: 13px; padding: 14px 2px; }
-  .foot-actions { display: flex; justify-content: flex-end; margin-top: 18px; }
-  .version { text-align: center; color: var(--muted-2); font: 11px var(--mono); margin-top: 26px; letter-spacing: .08em; }
-
-  @media (min-width: 940px) {
-    .grid { grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr); align-items: start; }
-    .grid .span { grid-column: 1 / -1; }
+  @media (max-width: 1120px) {
+    .rack { grid-template-columns: 34px 1fr 1fr 34px; }
+    .syscol { grid-column: 1 / -1; grid-template-rows: auto auto; }
+    .screen { height: 240px; }
+    .brand, .remote { flex-basis: auto; }
   }
-  @media (max-width: 560px) {
-    .shell { padding: 18px 14px 40px; }
-    .card { padding: 18px; border-radius: 18px; }
-    .hero .value { font-size: 52px; }
-    .stats { grid-template-columns: repeat(2, 1fr); }
-    .seg button span { display: none; }
+  @media (max-width: 720px) {
+    .rack { grid-template-columns: 1fr; }
+    .fader { flex-direction: row; height: 30px; }
+    .fader .track { width: auto; flex: 1; height: 12px; }
+    .fader .track i { top: 0; bottom: 0; left: 0; right: auto; width: 0%; height: auto; }
+    .sysrow { grid-template-columns: 1fr; }
+    .dbody { height: auto; }
+    .statuspill { min-width: 0; }
   }
 </style>
 </head>
 <body>
 <div class="shell">
-  <header class="top">
-    <div class="logo" aria-hidden="true">
-      <svg viewBox="0 0 24 24" fill="none" stroke="#06322b" stroke-width="2.1" stroke-linecap="round">
-        <path d="M3 12h2M7 8v8M11 4v16M15 7v10M19 10v4M21 12h0"/>
-      </svg>
+  <div class="topbar">
+    <div class="brand">SIREN MESH</div>
+    <div class="statuswrap">
+      <button class="nav" id="prevPage" hidden aria-label="上一页">‹</button>
+      <div class="statuspill" id="statePill"><i class="dot"></i><span id="stateText">未组网</span></div>
+      <button class="nav" id="nextPage" hidden aria-label="下一页">›</button>
     </div>
-    <div class="brand">
-      <h1>SIREN</h1>
-      <p>STUDIO</p>
-    </div>
-    <div class="top-right">
-      <div class="pill" id="statePill"><i class="dot"></i><span id="stateText">未组网</span></div>
-    </div>
-  </header>
+    <div class="remote" id="remoteCount">0 路远端</div>
+  </div>
 
   <div class="banner" id="banner"></div>
-  <div id="app"></div>
+
+  <div class="chassis">
+    <div class="screen"><canvas id="eq"></canvas></div>
+
+    <div class="rack">
+      <div class="fader" id="inMeter" style="--accent: var(--teal)">
+        <div class="track"><i></i></div>
+        <div class="lab">IN</div>
+        <div class="num">-48.0</div>
+      </div>
+
+      <div class="card" id="slot0"></div>
+      <div class="card" id="slot1"></div>
+
+      <div class="syscol">
+        <div class="sysrow">
+          <div class="card scard">
+            <div class="chead">
+              <span class="cname">本机</span><i class="led" id="localLed"></i>
+              <span class="spacer"></span><span class="svalue" id="localState">未入网</span>
+            </div>
+            <div class="slabel">节点名称</div>
+            <input type="text" id="name" maxlength="48" placeholder="Siren Node">
+            <div class="slabel">音源</div>
+            <div class="seg" id="sourceSeg">
+              <button data-source="tone">测试音</button>
+              <button data-source="loopback">系统内录</button>
+              <button data-source="mic">麦克风</button>
+            </div>
+            <div class="slabel">音调<span class="svalue" id="freqValue">440 Hz</span></div>
+            <input type="range" id="freq" min="40" max="12000" step="1" value="440" style="--accent: var(--violet)">
+          </div>
+
+          <div class="card scard">
+            <div class="chead">
+              <span class="cname">组网</span><i class="led" id="meshLed"></i>
+              <span class="spacer"></span><span class="svalue" id="deviceCount">1 台</span>
+            </div>
+            <div class="well readout">
+              <div class="fact">角色<b id="roleText">等待</b></div>
+              <div class="fact">链路<b id="linkText">等待</b></div>
+            </div>
+            <button class="bigbtn" id="join">加入组网</button>
+          </div>
+        </div>
+
+        <div class="strip">
+          <div class="sg" style="--accent: var(--teal)">
+            <div class="slabel" style="margin-top:0">缓冲<span class="svalue" id="targetValue">30 ms</span></div>
+            <input type="range" id="targetSlider" min="15" max="100" step="1" value="30">
+          </div>
+          <div class="sg" style="--accent: var(--amber)">
+            <div class="slabel" style="margin-top:0">主增益<span class="svalue" id="masterValue">0.0 dB</span></div>
+            <input type="range" id="masterSlider" min="-24" max="12" step="0.5" value="0">
+          </div>
+          <div class="seg"><button id="outputPill" type="button">本地播放</button></div>
+          <div class="seg"><button id="bypassPill" type="button">BYPASS</button></div>
+        </div>
+      </div>
+
+      <div class="fader" id="outMeter" style="--accent: var(--amber)">
+        <div class="track"><i></i></div>
+        <div class="lab">OUT</div>
+        <div class="num">-48.0</div>
+      </div>
+    </div>
+  </div>
+
   <div class="version" id="version">SIRENSTUDIO · LINUX WEBUI</div>
 </div>
 
@@ -254,10 +311,15 @@
 const state = {
   status: null,
   sourceDraft: null,
+  outputDraft: null,
+  page: 0,
   lastInputAt: 0,
   busy: false,
-  offline: false,
   error: null,
+  bypassed: false,
+  gainBeforeBypass: 0,
+  counters: {},
+  lastIssue: {},
 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -265,44 +327,70 @@ const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[c]));
 
+const CURVE_COLORS = ["#5ba7ff", "#ffa23e", "#2fd1c5", "#9b7cff", "#f87171", "#7bd88f"];
+const MIX_STREAM_ID = 0xfff0;
+
 function pct(db) {
   if (!Number.isFinite(db)) return 0;
   return Math.max(0, Math.min(100, ((db + 60) / 60) * 100));
 }
 function dbLabel(db) {
-  if (!Number.isFinite(db) || db <= -59.9) return "-∞";
+  if (!Number.isFinite(db) || db <= -59.9) return "-60.0";
   return db.toFixed(1);
 }
-function rateValue(kbps) {
-  if (!Number.isFinite(kbps)) return "0";
-  return kbps >= 1000 ? (kbps / 1000).toFixed(2) : String(Math.round(kbps));
-}
-function rateUnit(kbps) {
-  return Number.isFinite(kbps) && kbps >= 1000 ? "Mbps" : "kbps";
+function formatDb(value) {
+  const v = Number(value) || 0;
+  return (v > 0 ? "+" : "") + v.toFixed(1);
 }
 function sourceLabel(source) {
-  return { tone: "测试音", loopback: "系统内录", mic: "麦克风" }[source] || source;
+  return { tone: "测试音", loopback: "系统内录", mic: "麦克风", microphone: "麦克风" }[source] || source;
 }
-function interacting() {
-  return Date.now() - state.lastInputAt < 900;
+function pathLabel(path) {
+  return { wifi: "Wi-Fi", bt: "蓝牙", local: "本地" }[path] || (path || "—");
+}
+function roleLabel(role) { return { hub: "中心", leaf: "节点" }[role] || "等待"; }
+function btStateLabel(value) { return { listening: "监听", connected: "已连" }[value] || "等待"; }
+function interacting() { return Date.now() - state.lastInputAt < 900; }
+function plainName(peer) { return String(peer?.name || "").replace(/ \(mesh\)$/i, ""); }
+
+function streamName(stream, snap) {
+  const mix = Number(stream.stream_id) === MIX_STREAM_ID;
+  for (const peer of [...(snap?.peers || []), ...(snap?.topology || [])]) {
+    if (peer.uid && peer.uid === stream.origin) {
+      const name = plainName(peer);
+      return mix ? name + " · 混音" : name;
+    }
+  }
+  return mix ? "混音流" : String(stream.label || stream.id);
 }
 
-function configFromForm() {
-  const cfg = state.status?.config || {};
-  return {
-    name: ($("#name")?.value || cfg.name || "Siren Node").trim(),
-    source: state.sourceDraft || cfg.source || "loopback",
-    output: $("#output") ? $("#output").checked : (cfg.output ?? true),
-    target_ms: cfg.target_ms ?? 30,
-    port: cfg.port ?? 47900,
-    codec: cfg.codec || "raw",
-    frame_ms: cfg.frame_ms ?? 5,
-    freq: Number($("#freq")?.value || cfg.freq || 440),
-    output_sink: cfg.output_sink ?? null,
-    peers: cfg.peers || [],
-    bt_enabled: cfg.bt_enabled ?? true,
-    bt_channel: Number(cfg.bt_channel || 16),
-  };
+function deviceStreams(snap) {
+  return (snap?.center?.streams || []).filter((s) => Number(s.stream_id) !== MIX_STREAM_ID);
+}
+
+// 信号质量：丢帧或欠载计数一有增长就记一次事件，1 秒内红、4 秒内黄。
+function trackHealth(streams) {
+  const now = Date.now();
+  const seen = new Set();
+  for (const stream of streams) {
+    const key = String(stream.id);
+    seen.add(key);
+    const lost = Number(stream.lost_frames) || 0;
+    const under = Number(stream.underruns) || 0;
+    const prev = state.counters[key];
+    if (prev && (lost > prev.lost || under > prev.under)) state.lastIssue[key] = now;
+    state.counters[key] = { lost, under };
+  }
+  for (const key of Object.keys(state.counters)) {
+    if (!seen.has(key)) { delete state.counters[key]; delete state.lastIssue[key]; }
+  }
+}
+function healthClass(stream) {
+  if (!stream || !stream.active) return "";
+  const at = state.lastIssue[String(stream.id)];
+  if (!at) return "good";
+  const age = Date.now() - at;
+  return age < 1000 ? "bad" : age < 4000 ? "warn" : "good";
 }
 
 async function post(url, body) {
@@ -313,9 +401,7 @@ async function post(url, body) {
   });
   let payload = {};
   try { payload = await res.json(); } catch (_) {}
-  if (!res.ok || payload.ok === false) {
-    throw new Error(payload.error || ("HTTP " + res.status));
-  }
+  if (!res.ok || payload.ok === false) throw new Error(payload.error || ("HTTP " + res.status));
   state.error = null;
   return payload;
 }
@@ -325,509 +411,411 @@ async function poll() {
     const res = await fetch("/api/status", { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     state.status = await res.json();
-    state.offline = false;
     state.error = state.status.error || null;
   } catch (error) {
-    state.offline = true;
     state.error = "无法连接节点服务：" + error.message;
   }
   render();
 }
 
-function currentSource() {
-  const cfg = state.status?.config;
-  return state.sourceDraft || cfg?.source || "loopback";
+function configFromForm() {
+  const cfg = state.status?.config || {};
+  return {
+    name: ($("#name").value || cfg.name || "Siren Node").trim(),
+    source: $("#sourceSeg .active")?.dataset.source || cfg.source || "loopback",
+    output: state.outputDraft ?? (cfg.output !== false),
+    target_ms: Number($("#targetSlider").value) || cfg.target_ms || 30,
+    port: cfg.port ?? 47900,
+    codec: cfg.codec || "raw",
+    frame_ms: cfg.frame_ms ?? 5,
+    freq: Number($("#freq").value) || 440,
+    output_sink: cfg.output_sink ?? null,
+    peers: cfg.peers || [],
+    bt_enabled: cfg.bt_enabled ?? true,
+    bt_channel: Number(cfg.bt_channel || 16),
+  };
 }
 
-let lastSignature = null;
+/* 设备卡 */
+function slotMarkup(index, stream, snap) {
+  const name = stream ? esc(streamName(stream, snap)) : "等待节点";
+  const gain = stream ? Number(stream.gain_db) || 0 : -60;
+  const muted = Boolean(stream?.muted);
+  const accent = CURVE_COLORS[index % CURVE_COLORS.length];
+  const rot = (-140 + ((gain + 60) / 72) * 280).toFixed(1);
+  return `
+    <div class="chead">
+      <span class="cname" title="${name}">${name}</span>
+      <span class="spacer"></span>
+      <i class="led ${stream?.active ? "on" : ""}" title="连接状态"></i>
+      <i class="led ${healthClass(stream)}" title="信号质量"></i>
+      <button class="mutebtn ${muted ? "muted" : ""}" data-action="mute" title="${muted ? "取消静音" : "静音"}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <path d="M4 10v4h3l4 3V7L7 10H4z"/>
+          ${muted ? '<path d="M16 9l5 6M21 9l-5 6"/>' : '<path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/>'}
+        </svg>
+      </button>
+    </div>
+    <div class="dbody">
+      <div class="knobcol" style="--accent: ${accent}">
+        <div class="knob" data-action="gain" data-gain="${gain}" style="--rot: ${rot}deg"></div>
+        <div class="krange"><span>-60</span><span>+12</span></div>
+        <div class="klab">增益</div>
+      </div>
+      <div class="dright">
+        <div class="well level" style="--accent: ${accent}">
+          <span class="lk">当前电平</span>
+          <span class="lv">${dbLabel(stream?.rms_db)}<i>dB</i></span>
+          <div class="lbar"><i style="width:${pct(stream?.rms_db)}%"></i></div>
+        </div>
+        <div class="well facts">
+          <div class="fact">路径<b>${stream ? esc(pathLabel(stream.path)) : "—"}</b></div>
+          <div class="fact">丢帧<b>${stream ? (Number(stream.lost_frames) || 0) : 0}</b></div>
+          <div class="fact">欠载<b>${stream ? (Number(stream.underruns) || 0) : 0}</b></div>
+        </div>
+      </div>
+    </div>`;
+}
 
-function structureSignature(s) {
-  if (!s.running) {
-    return "idle|" + (s.config?.name || "");
+function renderSlots(snap) {
+  const streams = deviceStreams(snap);
+  const pages = Math.max(1, Math.ceil(streams.length / 2));
+  if (state.page > pages - 1) state.page = pages - 1;
+  for (let i = 0; i < 2; i++) {
+    const slot = $("#slot" + i);
+    const stream = streams[state.page * 2 + i];
+    const key = String(stream?.id ?? "none");
+    slot.classList.toggle("dim", !stream || !stream.active || Boolean(stream.muted));
+    if (slot.dataset.stream !== key || interacting()) {
+      if (slot.dataset.stream !== key) {
+        slot.dataset.stream = key;
+        slot.innerHTML = slotMarkup(i, stream, snap);
+      }
+    } else {
+      const level = $(".lv", slot);
+      if (level) level.innerHTML = dbLabel(stream?.rms_db) + "<i>dB</i>";
+      const bar = $(".lbar i", slot);
+      if (bar) bar.style.width = pct(stream?.rms_db) + "%";
+      const facts = slot.querySelectorAll(".fact b");
+      if (facts.length === 3) {
+        facts[0].textContent = stream ? pathLabel(stream.path) : "—";
+        facts[1].textContent = stream ? (Number(stream.lost_frames) || 0) : 0;
+        facts[2].textContent = stream ? (Number(stream.underruns) || 0) : 0;
+      }
+      const name = $(".cname", slot);
+      if (name && stream) { const text = streamName(stream, snap); if (name.textContent !== text) name.textContent = text; }
+      const leds = slot.querySelectorAll(".led");
+      if (leds.length === 2) {
+        leds[0].className = "led " + (stream?.active ? "on" : "");
+        leds[1].className = "led " + healthClass(stream);
+      }
+    }
   }
-  const snap = s.snapshot || {};
-  // Ignore ordering and endpoint flapping (multi-NIC mDNS): a signature
-  // change rebuilds the whole page and would break clicks mid-interaction.
-  const peers = (snap.peers || []).map((peer) => peer.name).sort().join(",");
-  const streams = (snap.center?.streams || [])
-    .map((stream) => stream.id + ":" + (stream.muted ? 1 : 0))
-    .sort()
-    .join(",");
-  const bt = snap.bt || {};
-  return "live|" + (snap.node_id || "") + "|" + peers + "|" + streams +
-    "|" + (bt.role || "") + "|" + (bt.state || "");
+  $("#prevPage").hidden = pages <= 1;
+  $("#nextPage").hidden = pages <= 1;
 }
 
+/* EQ 曲线 */
+const RULER = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 16000];
+const MIN_HZ = 20, MAX_HZ = 16000;
+const hzToX = (hz) => Math.log(hz / MIN_HZ) / Math.log(MAX_HZ / MIN_HZ);
+
+function drawEq(snap) {
+  const canvas = $("#eq");
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(rect.width * dpr);
+  canvas.height = Math.round(rect.height * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const w = rect.width, h = rect.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const plot = { left: 14, right: w - 14, top: 34, bottom: h - 16 };
+  const font = getComputedStyle(document.body).fontFamily;
+  ctx.strokeStyle = "rgba(145,167,185,.16)";
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) {
+    const y = plot.top + ((plot.bottom - plot.top) * i) / 4;
+    ctx.beginPath(); ctx.moveTo(plot.left, y); ctx.lineTo(plot.right, y); ctx.stroke();
+  }
+  ctx.fillStyle = "rgba(145,167,185,.6)";
+  ctx.font = "9.5px " + font;
+  ctx.textAlign = "center";
+  for (const hz of RULER) {
+    const x = plot.left + hzToX(hz) * (plot.right - plot.left);
+    ctx.beginPath(); ctx.moveTo(x, plot.top); ctx.lineTo(x, plot.top + 5); ctx.stroke();
+    ctx.fillText(hz >= 1000 ? (hz / 1000) + "k" : String(hz), x, plot.top - 12);
+  }
+  ctx.fillStyle = "rgba(145,167,185,.16)";
+  ctx.font = "700 17px " + font;
+  ctx.fillText("S I R E N :", (plot.left + plot.right) / 2, plot.top + 50);
+
+  const streams = deviceStreams(snap);
+  let legendX = plot.left + 2;
+  streams.forEach((stream, index) => {
+    const color = CURVE_COLORS[index % CURVE_COLORS.length];
+    const bands = stream.spectrum || [];
+    const gain = Math.max(0, Math.min(1.6, Math.pow(10, (Number(stream.gain_db) || 0) / 20)));
+    const dim = !stream.active || stream.muted;
+    if (bands.length > 1) {
+      const points = bands.map((value, b) => {
+        const t = (b + 0.5) / bands.length;
+        const hz = MIN_HZ * Math.pow(MAX_HZ / MIN_HZ, t);
+        const level = Math.max(0, Math.min(1, value * gain));
+        return [
+          plot.left + hzToX(hz) * (plot.right - plot.left),
+          plot.bottom - 1 - level * (plot.bottom - plot.top) * 0.86,
+        ];
+      });
+      ctx.beginPath();
+      ctx.moveTo(plot.left, points[0][1]);
+      for (const [x, y] of points) ctx.lineTo(x, y);
+      ctx.lineTo(plot.right, points[points.length - 1][1]);
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = dim ? 0.4 : 0.95;
+      ctx.lineWidth = 1.8;
+      ctx.lineJoin = "round";
+      ctx.stroke();
+      ctx.lineTo(plot.right, plot.bottom);
+      ctx.lineTo(plot.left, plot.bottom);
+      ctx.closePath();
+      ctx.globalAlpha = dim ? 0.06 : 0.16;
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    if (index < 4) {
+      const label = streamName(stream, snap);
+      ctx.textAlign = "left";
+      ctx.font = "600 10px " + font;
+      if (legendX + 11 + ctx.measureText(label).width > plot.right) return;
+      ctx.fillStyle = color;
+      ctx.fillRect(legendX, plot.top + 4, 7, 7);
+      ctx.fillStyle = "rgba(231,241,248,.8)";
+      ctx.fillText(label, legendX + 11, plot.top + 11);
+      legendX += 11 + ctx.measureText(label).width + 14;
+    }
+  });
+}
+
+/* 主渲染 */
 function render() {
   const s = state.status;
-  if (!s) return;
   const pill = $("#statePill");
-  const text = $("#stateText");
-  pill.className = "pill" + (s.running ? " on" : s.starting ? " busy" : "");
-  text.textContent = s.running ? "组网中" : s.starting ? "加入中…" : "未组网";
+  if (!s) {
+    pill.className = "statuspill";
+    $("#stateText").textContent = "连接中…";
+    return;
+  }
+  const snap = s.snapshot || {};
+  const cfg = s.config || {};
+  const streams = deviceStreams(snap);
+  const origins = new Set(streams.map((x) => x.origin));
+  const devices = Math.max((snap.peers?.length || 0) + 1, origins.size + 1);
+  trackHealth(snap.center?.streams || []);
+
+  pill.className = "statuspill" + (s.running ? " on" : s.starting ? " busy" : "");
+  const pages = Math.max(1, Math.ceil(streams.length / 2));
+  $("#stateText").textContent = s.running
+    ? (pages > 1 ? `组网中 · ${devices} 台　·　${state.page + 1}/${pages}` : `组网中 · ${devices} 台`)
+    : s.starting ? "加入中…" : "未组网";
+  $("#remoteCount").textContent = origins.size + " 路远端";
+  $("#version").textContent = "SIRENSTUDIO · LINUX WEBUI · v" + (s.version || "");
 
   const banner = $("#banner");
   banner.classList.toggle("show", Boolean(state.error));
   banner.textContent = state.error || "";
 
-  $("#version").textContent = "SIRENSTUDIO · LINUX WEBUI · v" + s.version;
-
-  if (interacting()) {
-    updateLiveNumbers();
-    return;
-  }
-
-  const signature = structureSignature(s);
-  if (signature === lastSignature) {
-    updateLiveNumbers();
-    return;
-  }
-  lastSignature = signature;
-
-  const app = $("#app");
-  if (!s.running) {
-    app.innerHTML = idleMarkup(s);
-    bindIdle();
-  } else {
-    app.innerHTML = liveMarkup(s);
-    bindLive();
-  }
-  updateLiveNumbers();
-}
-
-function idleMarkup(s) {
-  const cfg = s.config || {};
-  const source = currentSource();
-  return `
-    <div class="grid">
-      <section class="card span">
-        <div class="card-head">
-          <div class="icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="1.8" stroke-linecap="round">
-              <circle cx="6" cy="7" r="2.6"/><circle cx="18" cy="7" r="2.6"/><circle cx="12" cy="18" r="2.6"/>
-              <path d="M7.8 8.8 10.6 16M16.2 8.8 13.4 16M8.6 7h6.8"/>
-            </svg>
-          </div>
-          <div>
-            <h2>加入组网</h2>
-            <p class="sub">自动发现局域网内所有节点：Wi-Fi 与蓝牙同时工作，无需选择接入方式</p>
-          </div>
-          <span class="badge">${s.isolation ? "PipeWire 隔离" : "双栈自动"}</span>
-        </div>
-
-        <label class="field">节点名称</label>
-        <input type="text" id="name" maxlength="48" value="${esc(cfg.name || "Siren Node")}">
-
-        <div class="switch-row" style="margin-top:4px">
-          <div>
-            <div style="font-size:13.5px">Wi-Fi + 蓝牙双栈</div>
-            <div style="color:var(--muted-2);font-size:11.5px;margin-top:3px">两条链路同时传输同一帧，接收端按序号去重；Wi-Fi 断了蓝牙自动接管，切换不中断声音</div>
-          </div>
-          <label class="switch">
-            <input type="checkbox" checked disabled>
-            <span class="track"></span><span class="thumb"></span>
-          </label>
-        </div>
-
-        <label class="field">本机音频来源</label>
-        <div class="seg" id="sourceSeg">
-          <button data-source="tone" aria-label="测试音" class="${source === "tone" ? "active" : ""}">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 12h2M6 7v10M10 3v18M14 6v12M18 9v6M22 12h0"/></svg>
-            <span>测试音</span>
-          </button>
-          <button data-source="loopback" aria-label="系统内录" class="${source === "loopback" ? "active" : ""}">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
-            <span>系统内录</span>
-          </button>
-          <button data-source="mic" aria-label="麦克风" class="${source === "mic" ? "active" : ""}">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
-            <span>麦克风</span>
-          </button>
-        </div>
-
-        <div id="freqWrap" style="display:${source === "tone" ? "block" : "none"}">
-          <label class="field">测试音频率 (Hz)</label>
-          <input type="number" id="freq" min="40" max="12000" step="1" value="${esc(cfg.freq ?? 440)}">
-        </div>
-
-        <div class="switch-row">
-          <div>
-            <div style="font-size:13.5px">本地播放收到的音频</div>
-            <div style="color:var(--muted-2);font-size:11.5px;margin-top:3px">本机播放的回声会在发送前消除</div>
-          </div>
-          <label class="switch">
-            <input type="checkbox" id="output" ${cfg.output !== false ? "checked" : ""}>
-            <span class="track"></span><span class="thumb"></span>
-          </label>
-        </div>
-
-        <button class="primary" id="join" ${s.starting ? "disabled" : ""}>${s.starting ? "加入中…" : "加入组网"}</button>
-      </section>
-    </div>`;
-}
-
-function bindIdle() {
-  $("#sourceSeg")?.addEventListener("click", (event) => {
-    const button = event.target.closest("button[data-source]");
-    if (!button) return;
-    state.sourceDraft = button.dataset.source;
-    document.querySelectorAll("#sourceSeg button").forEach((b) => b.classList.toggle("active", b === button));
-    const wrap = $("#freqWrap");
-    if (wrap) wrap.style.display = state.sourceDraft === "tone" ? "block" : "none";
+  const nameInput = $("#name");
+  if (document.activeElement !== nameInput) nameInput.value = snap.name || cfg.name || "";
+  nameInput.disabled = Boolean(s.running);
+  const source = cfg.source || "loopback";
+  document.querySelectorAll("#sourceSeg button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.source === source);
+    button.disabled = Boolean(s.running);
   });
-  $("#join")?.addEventListener("click", async () => {
-    if (state.busy) return;
-    state.busy = true;
-    const button = $("#join");
-    button.disabled = true;
-    button.textContent = "加入中…";
-    try {
-      await post("/api/start", configFromForm());
-      state.sourceDraft = null;
-    } catch (error) {
-      state.error = error.message;
-      button.disabled = false;
-      button.textContent = "加入组网";
-    } finally {
-      state.busy = false;
-      poll();
-    }
-  });
-}
+  $("#localLed").className = "led" + (s.running ? " on" : "");
+  $("#localState").textContent = s.starting ? "处理中…" : (s.running ? "已入网" : "未入网");
+  if (document.activeElement !== $("#freq")) $("#freq").value = Number(cfg.freq || 440);
+  $("#freqValue").textContent = Math.round(Number($("#freq").value) || 440) + " Hz";
+  $("#freq").disabled = Boolean(s.running);
 
-function liveMarkup(s) {
-  const snap = s.snapshot || {};
-  const center = snap.center || {};
-  const master = center.master || {};
-  const sender = snap.sender || {};
-  const streams = center.streams || [];
-  const peers = snap.peers || [];
-  const config = s.config || {};
   const bt = snap.bt || {};
-  return `
-    <div class="grid">
-      <section class="card">
-        <div class="card-head">
-          <div class="icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="1.9" stroke-linecap="round"><path d="M3 12h2M7 6v12M11 3v18M15 8v8M19 5v14M21 12h0"/></svg>
-          </div>
-          <div>
-            <h2>主输出</h2>
-            <p class="sub">播放 · 已运行 <span id="runtime">${clock(snap.seconds || 0)}</span> · ${esc(snap.bind || "")}</p>
-          </div>
-          <span class="badge">${streams.length} 路混音</span>
-        </div>
+  $("#meshLed").className = "led" + (s.running ? " violet" : "");
+  $("#deviceCount").textContent = (s.running ? devices : 1) + " 台";
+  $("#roleText").textContent = roleLabel(bt.role);
+  $("#linkText").textContent = s.running ? `${btStateLabel(bt.state)} · ${bt.links ?? 0} 路` : "等待";
+  const join = $("#join");
+  join.textContent = s.starting ? "加入中…" : (s.running ? "离开组网" : "加入组网");
+  join.classList.toggle("leave", Boolean(s.running));
+  join.disabled = Boolean(state.busy);
 
-        <div class="hero">
-          <div class="value" id="masterDb">${dbLabel(master.rms_db)}</div>
-          <div class="unit">dBFS</div>
-        </div>
-        <div class="meter"><i id="masterBar"></i></div>
-
-        <div class="stats">
-          <div class="stat"><div class="k">节点</div><div class="v" id="peerCount">${peers.length + 1}<small>台</small></div></div>
-          <div class="stat"><div class="k">收到的流</div><div class="v" id="streamCount">${streams.length}<small>路</small></div></div>
-          <div class="stat"><div class="k">上行</div><div class="v" id="txKbps">${rateValue(sender.kbps)}<small>${rateUnit(sender.kbps)}</small></div></div>
-          <div class="stat"><div class="k">发出</div><div class="v" id="txFrames">${formatCount(sender.frames)}</div></div>
-        </div>
-
-        <div class="slider-row">
-          <div class="head"><span>缓冲目标</span><b><span id="targetValue">${Math.round(snap.center?.target_ms ?? config.target_ms ?? 30)}</span> ms</b></div>
-          <input type="range" id="targetSlider" min="15" max="100" step="1" value="${Math.round(snap.center?.target_ms ?? config.target_ms ?? 30)}">
-        </div>
-        <div class="slider-row">
-          <div class="head"><span>主增益</span><b><span id="masterGainValue">${formatDb(snap.center?.master_gain_db ?? 0)}</span> dB</b></div>
-          <input type="range" id="masterSlider" min="-24" max="12" step="0.5" value="${snap.center?.master_gain_db ?? 0}">
-        </div>
-
-        <div class="meta">
-          <span>Wi-Fi 在线</span>
-          <span>蓝牙 <b data-role="bt-summary" style="color:var(--teal);font-weight:600">${btLabel(bt)}</b></span>
-          ${s.isolation ? `<span>隔离 ${esc(s.isolation.capture_sink)} → ${esc(s.isolation.playback_sink)}</span>` : ""}
-          <span>发送电平 <b id="txLevel" style="color:var(--teal);font-weight:600">${dbLabel(sender.tx_rms_db)} dBFS</b></span>
-          <span>采集 ${formatCount(sender.capture_frames)} 帧</span>
-          <span>丢弃 ${formatCount(sender.capture_dropped_frames)}</span>
-          <span>静音 ${formatCount(sender.capture_silent_frames)}</span>
-          <span>读错 ${formatCount(sender.capture_read_errors)}</span>
-        </div>
-
-        <div class="foot-actions">
-          <button class="ghost" id="leave">离开组网</button>
-        </div>
-      </section>
-
-      <section class="card">
-        <div class="card-head">
-          <div class="icon" style="background:rgba(74,168,255,.09);border-color:rgba(74,168,255,.18)">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9ed8ff" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3.5 9h17M3.5 15h17M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>
-          </div>
-          <div>
-            <h2>已连接节点</h2>
-            <p class="sub">Wi-Fi 与蓝牙两条通路同时在线</p>
-          </div>
-          <span class="badge">${peers.length} 台</span>
-        </div>
-        <div id="peerList">${peerMarkup(peers)}</div>
-        <div class="meta" style="margin-top:14px">
-          <span>蓝牙角色 <b data-role="bt-role">${btRoleLabel(bt.role)}</b></span>
-          <span>状态 <b data-role="bt-state">${btStateLabel(bt.state)}</b></span>
-          <span>链路 <b data-role="bt-links">${bt.links ?? 0}</b></span>
-          <span data-role="bt-hub">${bt.hub_addr ? "中心 " + esc(bt.hub_addr) : ""}</span>
-        </div>
-        <div class="section-label" style="margin-top:22px">本机</div>
-        <div class="peer">
-          <div class="avatar">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12h3M9 7v10M13 4v16M17 8v8M20 11v2"/></svg>
-          </div>
-          <div><div class="name">${esc(snap.name || config.name || "Siren Node")}</div><div class="addr">${bt.role === "hub" ? "中心节点" : "节点"} · :${config.port || ""}</div></div>
-          <div class="online"><i></i>在线</div>
-        </div>
-      </section>
-
-      <section class="card span">
-        <div class="card-head">
-          <div class="icon" style="background:rgba(255,196,107,.08);border-color:rgba(255,196,107,.18)">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="1.9" stroke-linecap="round"><path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="3" y="14" width="4" height="6" rx="1.4"/><rect x="17" y="14" width="4" height="6" rx="1.4"/></svg>
-          </div>
-          <div>
-            <h2>收到的音频</h2>
-            <p class="sub">每路独立抖动缓冲与增益</p>
-          </div>
-          <span class="badge">${streams.length} 路</span>
-        </div>
-        <div id="streamList">${streamMarkup(streams, snap)}</div>
-      </section>
-    </div>`;
-}
-
-function peerMarkup(peers) {
-  if (!peers.length) return `<div class="empty">等待其他节点出现…</div>`;
-  return peers.map((peer) => `
-    <div class="peer" data-peer="${esc(plainPeerName(peer))}">
-      <div class="avatar">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
-      </div>
-      <div><div class="name">${esc(plainPeerName(peer))}</div><div class="addr" data-role="peer-addr">${esc(peer.endpoint)}${peer.bt ? " · BT " + esc(peer.bt) : ""}</div></div>
-      <div class="online"><i></i>在线</div>
-    </div>`).join("");
-}
-
-function pathLabel(path) {
-  return { wifi: "Wi-Fi", bt: "蓝牙", local: "本地" }[path] || "Wi-Fi";
-}
-function btRoleLabel(role) {
-  return { hub: "中心", leaf: "节点", waiting: "等待" }[role] || "未启用";
-}
-function btStateLabel(state) {
-  return {
-    listening: "监听中",
-    connected: "已连接",
-    connecting: "连接中",
-    waiting: "等待",
-    error: "错误",
-    off: "关闭",
-  }[state] || "关闭";
-}
-function btLabel(bt) {
-  if (!bt || !bt.enabled) return "关闭";
-  const role = bt.role === "hub" ? "中心" : bt.role === "leaf" ? "节点" : "";
-  const state = bt.state === "connected" ? "已连接" : bt.state === "listening" ? "监听中" : bt.state === "connecting" ? "连接中" : bt.state === "error" ? "错误" : "等待";
-  return [role, state].filter(Boolean).join(" · ") + (bt.links ? " · " + bt.links + " 路" : "");
-}
-
-function plainPeerName(peer) {
-  return (peer.name || "节点").replace(/\s*\(mesh\)\s*$/i, "").trim() || "节点";
-}
-
-function streamDisplayName(stream, snap) {
-  const peers = [...(snap.peers || []), ...(snap.topology || [])];
-  const origin = (stream.origin || "").toLowerCase();
-  const peer = peers.find((p) => (p.uid || "").toLowerCase() === origin && p.name);
-  const mix = stream.stream_id === 65520;
-  if (peer) return mix ? plainPeerName(peer) + " · 混音" : plainPeerName(peer);
-  return mix ? "混音流" : (stream.label || "未知节点");
-}
-
-function streamMarkup(streams, snap) {
-  if (!streams.length) return `<div class="empty">还没有收到其他节点的音频。</div>`;
-  return streams.map((stream) => `
-    <div class="stream" data-stream="${stream.id}">
-      <div class="sname">${esc(streamDisplayName(stream, snap || {}))}</div>
-      <div class="top">
-        <span class="tag">${esc(stream.codec.toUpperCase())}</span>
-        <span class="tag live" data-role="state">${stream.active ? "在线" : "超时"}</span>
-        <span class="tag" data-role="path">${pathLabel(stream.path)}</span>
-        <span style="font:12px var(--mono);color:var(--muted)">${esc(stream.addr)}</span>
-        <span class="level" data-role="level">${dbLabel(stream.rms_db)} dB</span>
-        <button class="mute ${stream.muted ? "off" : ""}" data-action="mute" data-id="${stream.id}" data-muted="${stream.muted}" title="静音">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="${stream.muted ? "m19 5-7 14" : "M15.5 8.5a5 5 0 0 1 0 7M18 6a9 9 0 0 1 0 12"}"/></svg>
-        </button>
-      </div>
-      <div class="meter thin"><i data-role="bar"></i></div>
-      <div class="foot">
-        <span>缓冲 <b data-role="buffer" style="color:var(--muted);font-weight:500">${stream.buffer_ms.toFixed(1)} / ${Math.round(stream.target_ms)} ms</b></span>
-        <span>欠载 <b data-role="underrun" style="color:var(--muted);font-weight:500">${stream.underruns}</b></span>
-        <span class="grow"></span>
-      </div>
-      <div class="gainline">
-        <input type="range" min="-30" max="12" step="0.5" value="${stream.gain_db}" data-action="gain" data-id="${stream.id}">
-        <b data-role="gain">${formatDb(stream.gain_db)} dB</b>
-      </div>
-    </div>`).join("");
-}
-
-function formatDb(value) {
-  if (!Number.isFinite(value)) return "0.0";
-  return (value > 0 ? "+" : "") + value.toFixed(1);
-}
-function formatCount(value) {
-  if (!Number.isFinite(value)) return "0";
-  if (value >= 1e6) return (value / 1e6).toFixed(1) + "M";
-  if (value >= 1e4) return (value / 1e3).toFixed(1) + "k";
-  return String(Math.round(value));
-}
-function clock(seconds) {
-  const total = Math.max(0, Math.floor(seconds || 0));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  return (h ? String(h).padStart(2, "0") + ":" : "") +
-    String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
-}
-
-function updateLiveNumbers() {
-  if (!state.status?.running) return;
-  const snap = state.status.snapshot;
-  if (!snap) return;
-  const master = snap.center?.master || {};
-  const value = $("#masterDb");
-  if (value) value.textContent = dbLabel(master.rms_db);
-  const bar = $("#masterBar");
-  if (bar && !interacting()) bar.style.width = pct(master.rms_db) + "%";
-  const runtime = $("#runtime");
-  if (runtime) runtime.textContent = clock(snap.seconds || 0);
-  const kbps = $("#txKbps");
-  if (kbps) kbps.innerHTML = rateValue(snap.sender?.kbps) + "<small>" + rateUnit(snap.sender?.kbps) + "</small>";
-  const frames = $("#txFrames");
-  if (frames) frames.textContent = formatCount(snap.sender?.frames);
-  const txLevel = $("#txLevel");
-  if (txLevel) txLevel.textContent = dbLabel(snap.sender?.tx_rms_db) + " dBFS";
-  const streams = snap.center?.streams || [];
-  const peerCount = $("#peerCount");
-  if (peerCount && !interacting()) peerCount.innerHTML = ((snap.peers?.length || 0) + 1) + "<small>台</small>";
-  const streamCount = $("#streamCount");
-  if (streamCount && !interacting()) streamCount.innerHTML = streams.length + "<small>路</small>";
-  const bt = snap.bt || {};
-  const btSummary = document.querySelector('[data-role="bt-summary"]');
-  if (btSummary) btSummary.textContent = btLabel(bt);
-  const btRole = document.querySelector('[data-role="bt-role"]');
-  if (btRole) btRole.textContent = btRoleLabel(bt.role);
-  const btState = document.querySelector('[data-role="bt-state"]');
-  if (btState) btState.textContent = btStateLabel(bt.state);
-  const btLinks = document.querySelector('[data-role="bt-links"]');
-  if (btLinks) btLinks.textContent = String(bt.links ?? 0);
-  const btHub = document.querySelector('[data-role="bt-hub"]');
-  if (btHub) btHub.textContent = bt.hub_addr ? "中心 " + bt.hub_addr : "";
-  for (const peer of snap.peers || []) {
-    const name = plainPeerName(peer).replace(/"/g, '\\"');
-    const row = document.querySelector(`[data-peer="${name}"]`);
-    const addr = row?.querySelector('[data-role="peer-addr"]');
-    const text = peer.endpoint + (peer.bt ? " · BT " + peer.bt : "");
-    if (addr && addr.textContent !== text) addr.textContent = text;
+  const target = Math.round(snap.center?.target_ms ?? cfg.target_ms ?? 30);
+  const master = Number(snap.center?.master_gain_db ?? 0);
+  if (!interacting()) {
+    setRange("#targetSlider", target, 15, 100);
+    setRange("#masterSlider", master, -24, 12);
   }
-  for (const stream of streams) {
-    const box = document.querySelector(`[data-stream="${stream.id}"]`);
-    if (!box) continue;
-    const name = box.querySelector('.sname');
-    const text = streamDisplayName(stream, snap);
-    if (name && name.textContent !== text) name.textContent = text;
-  }
-  for (const stream of streams) {
-    const box = document.querySelector(`[data-stream="${stream.id}"]`);
-    if (!box) continue;
-    const level = box.querySelector('[data-role="level"]');
-    if (level) level.textContent = dbLabel(stream.rms_db) + " dB";
-    const streamBar = box.querySelector('[data-role="bar"]');
-    if (streamBar) streamBar.style.width = pct(stream.rms_db) + "%";
-    const buffer = box.querySelector('[data-role="buffer"]');
-    if (buffer) buffer.textContent = stream.buffer_ms.toFixed(1) + " / " + Math.round(stream.target_ms) + " ms";
-    const underrun = box.querySelector('[data-role="underrun"]');
-    if (underrun) underrun.textContent = stream.underruns;
-    const streamState = box.querySelector('[data-role="state"]');
-    if (streamState) streamState.textContent = stream.active ? "在线" : "超时";
-    const path = box.querySelector('[data-role="path"]');
-    if (path) path.textContent = pathLabel(stream.path);
-  }
+  $("#targetValue").textContent = target + " ms";
+  $("#masterValue").textContent = formatDb(master) + " dB";
+  const outputOn = (state.outputDraft ?? (cfg.output !== false)) !== false;
+  $("#outputPill").textContent = outputOn ? "本地播放" : "静默接收";
+  $("#outputPill").classList.toggle("active", outputOn);
+  $("#bypassPill").classList.toggle("active", state.bypassed);
+
+  setMeter("#inMeter", snap.sender?.tx_rms_db);
+  setMeter("#outMeter", snap.center?.master?.rms_db);
+
+  renderSlots(snap);
+  drawEq(snap);
 }
 
-function bindLive() {
-  $("#leave")?.addEventListener("click", async () => {
-    if (state.busy) return;
-    state.busy = true;
-    try { await post("/api/stop", {}); }
-    catch (error) { state.error = error.message; }
-    finally { state.busy = false; poll(); }
-  });
+function setRange(sel, value, min, max) {
+  const el = $(sel);
+  if (!el) return;
+  el.value = value;
+  el.style.setProperty("--fill", (((value - min) / (max - min)) * 100).toFixed(1) + "%");
+}
 
-  $("#targetSlider")?.addEventListener("input", (event) => {
+function setMeter(sel, db) {
+  const el = $(sel);
+  if (!el) return;
+  $(".track i", el).style.height = pct(db) + "%";
+  $(".track i", el).style.width = pct(db) + "%";
+  $(".num", el).textContent = dbLabel(db);
+}
+
+/* 交互 */
+function debounce(key, fn, ms = 300) {
+  clearTimeout(state[key]);
+  state[key] = setTimeout(fn, ms);
+}
+
+function bindKnob(knob, slot) {
+  let startY = 0, startGain = 0, dragging = false;
+  const apply = (gain) => {
+    const value = Math.max(-60, Math.min(12, gain));
+    knob.dataset.gain = String(value);
+    knob.style.setProperty("--rot", (-140 + ((value + 60) / 72) * 280).toFixed(1) + "deg");
     state.lastInputAt = Date.now();
-    const value = Math.round(Number(event.target.value));
-    const label = $("#targetValue");
-    if (label) label.textContent = value;
-    clearTimeout(state.targetTimer);
-    state.targetTimer = setTimeout(async () => {
+    const id = slot.dataset.stream;
+    debounce("gainTimer", async () => {
+      try { await post(`/api/streams/${id}`, { gain_db: value }); }
+      catch (error) { state.error = error.message; }
+      poll();
+    });
+  };
+  knob.addEventListener("pointerdown", (event) => {
+    dragging = true;
+    startY = event.clientY;
+    startGain = Number(knob.dataset.gain) || 0;
+    knob.setPointerCapture(event.pointerId);
+  });
+  knob.addEventListener("pointermove", (event) => {
+    if (!dragging) return;
+    apply(startGain - ((event.clientY - startY) / 200) * 72);
+  });
+  knob.addEventListener("pointerup", () => { dragging = false; state.lastInputAt = 0; poll(); });
+  knob.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    apply(Number(knob.dataset.gain) + (event.deltaY < 0 ? 1 : -1));
+  }, { passive: false });
+}
+
+function bindStatic() {
+  $("#prevPage").addEventListener("click", () => { state.page = Math.max(0, state.page - 1); render(); });
+  $("#nextPage").addEventListener("click", () => { state.page = state.page + 1; render(); });
+
+  $("#sourceSeg").addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-source]");
+    if (!button || button.disabled) return;
+    state.status = state.status || {};
+    state.status.config = state.status.config || {};
+    state.status.config.source = button.dataset.source;
+    render();
+  });
+  $("#freq").addEventListener("input", (event) => {
+    $("#freqValue").textContent = Math.round(Number(event.target.value)) + " Hz";
+  });
+
+  $("#join").addEventListener("click", async () => {
+    if (state.busy) return;
+    state.busy = true;
+    render();
+    try {
+      if (state.status?.running) await post("/api/stop", {});
+      else await post("/api/start", configFromForm());
+    } catch (error) { state.error = error.message; }
+    finally { state.busy = false; await poll(); }
+  });
+
+  $("#targetSlider").addEventListener("input", (event) => {
+    state.lastInputAt = Date.now();
+    const value = Number(event.target.value);
+    setRange("#targetSlider", value, 15, 100);
+    $("#targetValue").textContent = Math.round(value) + " ms";
+    debounce("targetTimer", async () => {
       try { await post("/api/controls", { target_ms: value }); }
       catch (error) { state.error = error.message; }
       poll();
-    }, 350);
+    });
   });
-  $("#targetSlider")?.addEventListener("change", () => { state.lastInputAt = 0; poll(); });
+  $("#targetSlider").addEventListener("change", () => { state.lastInputAt = 0; poll(); });
 
-  $("#masterSlider")?.addEventListener("input", (event) => {
+  $("#masterSlider").addEventListener("input", (event) => {
     state.lastInputAt = Date.now();
     const value = Number(event.target.value);
-    const label = $("#masterGainValue");
-    if (label) label.textContent = formatDb(value);
-    clearTimeout(state.masterTimer);
-    state.masterTimer = setTimeout(async () => {
+    setRange("#masterSlider", value, -24, 12);
+    $("#masterValue").textContent = formatDb(value) + " dB";
+    debounce("masterTimer", async () => {
       try { await post("/api/controls", { master_gain_db: value }); }
       catch (error) { state.error = error.message; }
       poll();
-    }, 350);
+    });
   });
-  $("#masterSlider")?.addEventListener("change", () => { state.lastInputAt = 0; poll(); });
+  $("#masterSlider").addEventListener("change", () => { state.lastInputAt = 0; poll(); });
 
-  $("#streamList")?.addEventListener("input", (event) => {
-    const slider = event.target.closest('input[data-action="gain"]');
-    if (!slider) return;
-    state.lastInputAt = Date.now();
-    const value = Number(slider.value);
-    const label = slider.parentElement?.querySelector('[data-role="gain"]');
-    if (label) label.textContent = formatDb(value) + " dB";
-    clearTimeout(state.streamTimer);
-    state.streamTimer = setTimeout(async () => {
-      try { await post(`/api/streams/${slider.dataset.id}`, { gain_db: value }); }
+  $("#outputPill").addEventListener("click", () => {
+    const cfg = state.status?.config || {};
+    state.outputDraft = !(state.outputDraft ?? cfg.output !== false);
+    render();
+  });
+  $("#bypassPill").addEventListener("click", async () => {
+    const current = Number(state.status?.snapshot?.center?.master_gain_db ?? 0);
+    state.bypassed = !state.bypassed;
+    if (state.bypassed) state.gainBeforeBypass = current;
+    const value = state.bypassed ? -60 : state.gainBeforeBypass;
+    try { await post("/api/controls", { master_gain_db: value }); }
+    catch (error) { state.error = error.message; }
+    render();
+  });
+
+  for (const slot of [$("#slot0"), $("#slot1")]) {
+    slot.addEventListener("click", async (event) => {
+      const button = event.target.closest('[data-action="mute"]');
+      if (!button) return;
+      const id = slot.dataset.stream;
+      if (!id || id === "none") return;
+      const stream = deviceStreams(state.status?.snapshot).find((s) => String(s.id) === id);
+      try { await post(`/api/streams/${id}`, { muted: !stream?.muted }); }
       catch (error) { state.error = error.message; }
+      slot.dataset.stream = "";
       poll();
-    }, 350);
-  });
-  $("#streamList")?.addEventListener("change", (event) => {
-    if (event.target.closest('input[data-action="gain"]')) { state.lastInputAt = 0; poll(); }
-  });
+    });
+    new MutationObserver(() => {
+      const knob = $(".knob", slot);
+      if (knob && !knob.dataset.bound) { knob.dataset.bound = "1"; bindKnob(knob, slot); }
+    }).observe(slot, { childList: true });
+  }
 
-  $("#streamList")?.addEventListener("click", async (event) => {
-    const button = event.target.closest('button[data-action="mute"]');
-    if (!button) return;
-    try {
-      await post(`/api/streams/${button.dataset.id}`, { muted: button.dataset.muted !== "true" });
-    } catch (error) {
-      state.error = error.message;
-    }
-    poll();
+  window.addEventListener("resize", () => {
+    if (state.status?.running) drawEq(state.status.snapshot || {});
   });
 }
 
-render();
+bindStatic();
 poll();
 setInterval(poll, 700);
 </script>
