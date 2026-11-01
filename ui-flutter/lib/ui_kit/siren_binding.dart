@@ -318,7 +318,8 @@ class SirenBinding {
         target: target,
         master: master,
         isBusy: app.busyMesh,
-        detail: bt == null ? '' : '$role · $state · ${bt.links} 路',
+        role: role,
+        link: bt == null ? '等待' : '$state · ${bt.links} 路',
         peers: origins.length,
         devices: running ? devices : 1,
       );

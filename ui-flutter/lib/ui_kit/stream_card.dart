@@ -4,9 +4,10 @@ import 'controls.dart';
 import 'model.dart';
 import 'theme.dart';
 
-/// 桌面远端流卡片：只保留增益旋钮、当前电平窗、路径与丢帧/欠载。
+/// 桌面远端流卡片，对应参考图的 SUB 1 / SUB 2：
+/// 只有一颗大增益旋钮，右侧是电平窗，窗下竖排路径/丢帧/欠载。
 ///
-/// 顶部三枚控件依次是连接状态、信号质量灯与一键静音。
+/// 右上角三枚依次是连接状态、信号质量与一键静音。
 class StreamCard extends StatelessWidget {
   const StreamCard({
     super.key,
@@ -14,6 +15,8 @@ class StreamCard extends StatelessWidget {
     required this.palette,
     required this.size,
   });
+
+  static const Size design = Size(242, 268);
 
   final ModuleChannel channel;
   final MetalPalette palette;
@@ -30,13 +33,13 @@ class StreamCard extends StatelessWidget {
           child: NeuRaised(
             palette: p,
             size: size,
-            radius: 14,
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            radius: 16,
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 SizedBox(
-                  height: 20,
+                  height: 22,
                   child: Row(
                     children: [
                       Expanded(
@@ -62,64 +65,68 @@ class StreamCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 9),
-                      _MuteButton(
-                        palette: p,
-                        muted: channel.mute,
-                        onTap: channel.toggleMute,
-                      ),
+                      _MuteButton(palette: p, muted: channel.mute, onTap: channel.toggleMute),
                     ],
                   ),
                 ),
                 const SizedBox(height: 8),
-                Center(
-                  child: NeuKnob(
-                    palette: p,
-                    size: 112,
-                    value: channel.amount,
-                    range: channel.amountRange,
-                    accentColor: channel.accentFor(p),
-                    onChanged: channel.setAmount,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Center(
-                  child: SizedBox(
-                    width: 112,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          channel.amountRange.min.toInt().toString(),
-                          style: NeuType.chrome(10, p.inkFaint, tracking: .6),
+                Expanded(
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 112,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            NeuKnob(
+                              palette: p,
+                              size: 112,
+                              value: channel.amount,
+                              range: channel.amountRange,
+                              accentColor: channel.accentFor(p),
+                              onChanged: channel.setAmount,
+                            ),
+                            const SizedBox(height: 2),
+                            SizedBox(
+                              width: 108,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    channel.amountRange.min.toInt().toString(),
+                                    style: NeuType.chrome(9.5, p.inkFaint, tracking: .4),
+                                  ),
+                                  Text(
+                                    channel.amountRange.min < 0
+                                        ? '+${channel.amountRange.max.toInt()}'
+                                        : channel.amountRange.max.toInt().toString(),
+                                    style: NeuType.chrome(9.5, p.inkFaint, tracking: .4),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '增益',
+                              style: NeuType.chrome(11, p.ink, tracking: 1.6, w: FontWeight.w700),
+                            ),
+                          ],
                         ),
-                        Text(
-                          channel.amountRange.min < 0
-                              ? '+${channel.amountRange.max.toInt()}'
-                              : channel.amountRange.max.toInt().toString(),
-                          style: NeuType.chrome(10, p.inkFaint, tracking: .6),
+                      ),
+                      const SizedBox(width: 6),
+                      SizedBox(
+                        width: 92,
+                        child: Column(
+                          children: [
+                            _LevelWindow(palette: p, db: channel.rmsDb, accent: channel.accentFor(p)),
+                            const SizedBox(height: 8),
+                            Expanded(child: _Facts(palette: p, channel: channel)),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 6),
-                Center(
-                  child: NeuValueField(
-                    palette: p,
-                    value: channel.amount,
-                    range: channel.amountRange,
-                    onChanged: channel.setAmount,
-                    width: 96,
-                    height: 26,
-                    unit: channel.amountUnit,
-                    accent: channel.accentFor(p),
-                    fontSize: 13,
-                  ),
-                ),
-                const Spacer(),
-                _LevelWindow(palette: p, db: channel.rmsDb, accent: channel.accentFor(p)),
-                const SizedBox(height: 8),
-                _Facts(palette: p, channel: channel),
               ],
             ),
           ),
@@ -136,7 +143,7 @@ class StreamCard extends StatelessWidget {
       };
 }
 
-/// 当前电平：数值 + 横向电平条。
+/// 当前电平窗：数值 + 电平条，占参考图 LCD 小窗的位置。
 class _LevelWindow extends StatelessWidget {
   const _LevelWindow({required this.palette, required this.db, required this.accent});
 
@@ -153,28 +160,40 @@ class _LevelWindow extends StatelessWidget {
             ? palette.orange
             : accent;
     return SizedBox(
-      height: 50,
+      height: 104,
       child: NeuWell(
-        radius: 9,
+        radius: 10,
         palette: palette,
         deep: true,
-        padding: const EdgeInsets.fromLTRB(9, 6, 9, 7),
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 9),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Text('当前电平', style: NeuType.chrome(9.5, palette.inkFaint, tracking: .6)),
-                const Spacer(),
-                Text(
-                  '${db.toStringAsFixed(1)} dB',
-                  style: NeuType.numeric(13, barColor),
-                ),
-              ],
-            ),
+            Text('当前电平', style: NeuType.chrome(9.5, palette.inkFaint, tracking: .4)),
             const Spacer(),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text(
+                    db.toStringAsFixed(1),
+                    style: NeuType.numeric(22, barColor).copyWith(
+                      shadows: [Shadow(color: barColor.withValues(alpha: .45), blurRadius: 8)],
+                    ),
+                  ),
+                  Text(
+                    ' dB',
+                    style: NeuType.chrome(10, barColor.withValues(alpha: .8), tracking: .6),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 7),
             SizedBox(
-              height: 6,
+              height: 5,
               child: LayoutBuilder(
                 builder: (context, box) => Stack(
                   children: [
@@ -193,7 +212,7 @@ class _LevelWindow extends StatelessWidget {
                       width: box.maxWidth * norm,
                       child: DecoratedBox(
                         decoration: BoxDecoration(
-                          gradient: LinearGradient(colors: [barColor.withValues(alpha: .55), barColor]),
+                          gradient: LinearGradient(colors: [barColor.withValues(alpha: .5), barColor]),
                           borderRadius: BorderRadius.circular(3),
                         ),
                       ),
@@ -209,7 +228,7 @@ class _LevelWindow extends StatelessWidget {
   }
 }
 
-/// 路径 / 丢帧 / 欠载。
+/// 路径 / 丢帧 / 欠载，竖排三行。
 class _Facts extends StatelessWidget {
   const _Facts({required this.palette, required this.channel});
 
@@ -218,50 +237,40 @@ class _Facts extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 56,
-      child: NeuWell(
-        radius: 9,
-        palette: palette,
-        tint: palette.wellTint,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-        child: Row(
-          children: [
-            Expanded(child: _cell('路径', channel.pathText)),
-            _divider(),
-            Expanded(child: _cell('丢帧', '${channel.lostFrames}')),
-            _divider(),
-            Expanded(child: _cell('欠载', '${channel.underruns}')),
-          ],
-        ),
+    return NeuWell(
+      radius: 10,
+      palette: palette,
+      tint: palette.wellTint,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _row('路径', channel.pathText),
+          _row('丢帧', '${channel.lostFrames}'),
+          _row('欠载', '${channel.underruns}'),
+        ],
       ),
     );
   }
 
-  Widget _divider() => Container(
-        width: 1,
-        height: 24,
-        color: palette.bevel.withValues(alpha: .35),
-      );
-
-  Widget _cell(String label, String value) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _row(String label, String value) {
+    return Row(
       children: [
-        Text(label, style: NeuType.chrome(9.5, palette.inkFaint, tracking: .8)),
-        const SizedBox(height: 2),
-        Text(
-          value,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: NeuType.numeric(11.5, palette.ink),
+        Text(label, style: NeuType.chrome(9.5, palette.inkFaint, tracking: .4)),
+        Expanded(
+          child: Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.right,
+            style: NeuType.numeric(12, palette.ink),
+          ),
         ),
       ],
     );
   }
 }
-
 
 /// 一键静音：圆形金属键 + 扬声器图标，静音时整键变红。
 class _MuteButton extends StatelessWidget {

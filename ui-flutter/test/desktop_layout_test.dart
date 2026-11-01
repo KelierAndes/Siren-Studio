@@ -35,7 +35,8 @@ void main() {
         target: 120,
         master: -3,
         isBusy: false,
-        detail: '中心 · 已连 · 2 路',
+        role: '中心',
+        link: '已连 · 2 路',
         peers: 3,
         devices: 3,
       );
@@ -51,18 +52,18 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 40));
     expect(tester.takeException(), isNull);
-    expect(find.text('1/2'), findsOneWidget);
+    expect(find.textContaining('1/2'), findsOneWidget);
     expect(find.text('当前电平'), findsNWidgets(2));
     expect(find.text('路径'), findsNWidgets(2));
     expect(find.text('丢帧'), findsNWidgets(2));
     expect(find.text('欠载'), findsNWidgets(2));
-    expect(find.text('-18.5 dB'), findsOneWidget);
+    expect(find.text('-18.5'), findsOneWidget);
     expect(find.text('Wi-Fi'), findsOneWidget);
 
     model.setStreamPage(1);
     await tester.pump(const Duration(milliseconds: 40));
     expect(tester.takeException(), isNull);
-    expect(find.text('2/2'), findsOneWidget);
+    expect(find.textContaining('2/2'), findsOneWidget);
 
     model.setTheme(model.theme == AppThemeMode.dark ? AppThemeMode.light : AppThemeMode.dark);
     await tester.pump(const Duration(milliseconds: 40));

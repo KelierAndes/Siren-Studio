@@ -381,7 +381,8 @@ class ShaperModel extends ChangeNotifier {
   double targetMs = 100;
   double masterGainDb = 0;
   bool busy = false;
-  String meshDetail = '';
+  String meshRole = '等待';
+  String meshLink = '等待';
   int onlinePeers = 0;
   /// Unique mesh devices (discovered peers and stream origins).
   int meshDevices = 1;
@@ -481,7 +482,8 @@ class ShaperModel extends ChangeNotifier {
     required double target,
     required double master,
     required bool isBusy,
-    required String detail,
+    required String role,
+    required String link,
     required int peers,
     required int devices,
   }) {
@@ -492,7 +494,8 @@ class ShaperModel extends ChangeNotifier {
         (targetMs - target).abs() > .01 ||
         (masterGainDb - master).abs() > .01 ||
         busy != isBusy ||
-        meshDetail != detail ||
+        meshRole != role ||
+        meshLink != link ||
         onlinePeers != peers ||
         meshDevices != devices;
     nodeName = name;
@@ -502,7 +505,8 @@ class ShaperModel extends ChangeNotifier {
     targetMs = target;
     masterGainDb = master;
     busy = isBusy;
-    meshDetail = detail;
+    meshRole = role;
+    meshLink = link;
     onlinePeers = peers;
     meshDevices = devices;
     if (changed) notifyListeners();
