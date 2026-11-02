@@ -61,7 +61,9 @@ impl Advertiser {
         let instance = format!("{name} ({role})");
         let bit_value = bit.map(|bit| bit.to_string()).unwrap_or_default();
         let bt_value = bt.unwrap_or("").to_string();
-        let channel_value = bt_channel.map(|channel| channel.to_string()).unwrap_or_default();
+        let channel_value = bt_channel
+            .map(|channel| channel.to_string())
+            .unwrap_or_default();
         let properties = [
             ("role", role),
             ("name", name),

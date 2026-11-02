@@ -308,13 +308,11 @@ mod bitrate_tests {
         let pcm: Vec<f32> = (0..frame)
             .map(|index| {
                 let sample = index / CHANNELS;
-                let phase =
-                    2.0 * std::f32::consts::PI * 440.0 * sample as f32 / SAMPLE_RATE as f32;
+                let phase = 2.0 * std::f32::consts::PI * 440.0 * sample as f32 / SAMPLE_RATE as f32;
                 phase.sin() * 0.25
             })
             .collect();
-        let mut encoder =
-            AudioEncoder::with_bitrate(Codec::Opus, Some(bitrate)).expect("encoder");
+        let mut encoder = AudioEncoder::with_bitrate(Codec::Opus, Some(bitrate)).expect("encoder");
         let mut decoder = AudioDecoder::new(Codec::Opus).expect("decoder");
         let mut payload = Vec::new();
         encoder.encode(&pcm, &mut payload).expect("encode");

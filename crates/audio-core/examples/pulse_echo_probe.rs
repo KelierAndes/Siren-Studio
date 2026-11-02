@@ -25,7 +25,11 @@ fn main() {
     const REC_FRAMES: usize = 240; // 5 ms
 
     fn spec() -> Spec {
-        Spec { format: Format::F32le, rate: RATE, channels: CH as u8 }
+        Spec {
+            format: Format::F32le,
+            rate: RATE,
+            channels: CH as u8,
+        }
     }
 
     fn bytes_for(frames: usize) -> Vec<u8> {

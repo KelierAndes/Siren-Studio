@@ -202,32 +202,31 @@ impl CenterEngine {
             Some(receiver)
         };
 
-        let advertiser: Option<Advertiser> = if config.advertise
-            && !matches!(config.mode, CenterMode::Idle | CenterMode::Sink)
-        {
-            let port = receiver
-                .as_ref()
-                .map(|receiver| receiver.local_addr.port())
-                .unwrap_or(0);
-            match discovery::advertise_full(
-                &config.role,
-                &config.name,
-                port,
-                "raw,opus",
-                &config.node_id,
-                config.bit,
-                config.bt.as_deref(),
-                config.bt_channel,
-            ) {
-                Ok(advertiser) => Some(advertiser),
-                Err(error) => {
-                    log::warn!("mDNS advertising failed: {error}");
-                    None
+        let advertiser: Option<Advertiser> =
+            if config.advertise && !matches!(config.mode, CenterMode::Idle | CenterMode::Sink) {
+                let port = receiver
+                    .as_ref()
+                    .map(|receiver| receiver.local_addr.port())
+                    .unwrap_or(0);
+                match discovery::advertise_full(
+                    &config.role,
+                    &config.name,
+                    port,
+                    "raw,opus",
+                    &config.node_id,
+                    config.bit,
+                    config.bt.as_deref(),
+                    config.bt_channel,
+                ) {
+                    Ok(advertiser) => Some(advertiser),
+                    Err(error) => {
+                        log::warn!("mDNS advertising failed: {error}");
+                        None
+                    }
                 }
-            }
-        } else {
-            None
-        };
+            } else {
+                None
+            };
 
         let info = CenterInfo {
             bind: receiver
@@ -541,7 +540,6 @@ fn run_center(
             }
             _ => thread::sleep(Duration::from_millis(10)),
         }
-
     }
 
     match sink {

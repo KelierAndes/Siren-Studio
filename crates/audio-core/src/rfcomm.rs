@@ -215,8 +215,7 @@ mod native {
         }
 
         fn write_raw(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
-            let written =
-                unsafe { libc::write(self.0, buffer.as_ptr() as *const _, buffer.len()) };
+            let written = unsafe { libc::write(self.0, buffer.as_ptr() as *const _, buffer.len()) };
             if written < 0 {
                 Err(std::io::Error::last_os_error())
             } else {
@@ -260,7 +259,10 @@ mod native {
                 }
             }
         }
-        if let Ok(output) = std::process::Command::new("bluetoothctl").arg("show").output() {
+        if let Ok(output) = std::process::Command::new("bluetoothctl")
+            .arg("show")
+            .output()
+        {
             if let Ok(text) = String::from_utf8(output.stdout) {
                 for line in text.lines() {
                     let line = line.trim();
@@ -489,17 +491,18 @@ mod native {
     use super::*;
     use windows::core::GUID;
     use windows::Win32::Devices::Bluetooth::{
+        BluetoothEnableDiscovery, BluetoothFindDeviceClose, BluetoothFindFirstDevice,
+        BluetoothFindNextDevice, BLUETOOTH_DEVICE_INFO, BLUETOOTH_DEVICE_SEARCH_PARAMS,
+    };
+    use windows::Win32::Devices::Bluetooth::{
         BluetoothFindFirstRadio, BluetoothFindRadioClose, BluetoothGetRadioInfo, AF_BTH,
-        BTHPROTO_RFCOMM, BLUETOOTH_FIND_RADIO_PARAMS, BLUETOOTH_RADIO_INFO, SOCKADDR_BTH,
+        BLUETOOTH_FIND_RADIO_PARAMS, BLUETOOTH_RADIO_INFO, BTHPROTO_RFCOMM, SOCKADDR_BTH,
     };
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::Networking::WinSock::{
-        accept, bind, closesocket, connect as bth_connect, ioctlsocket, listen as winsock_listen, recv, send,
-        socket, WSAGetLastError, WSAStartup, SEND_RECV_FLAGS, SOCKET, SOCK_STREAM, WSADATA,
-    };
-    use windows::Win32::Devices::Bluetooth::{
-        BluetoothEnableDiscovery, BluetoothFindDeviceClose, BluetoothFindFirstDevice,
-        BluetoothFindNextDevice, BLUETOOTH_DEVICE_INFO, BLUETOOTH_DEVICE_SEARCH_PARAMS,
+        accept, bind, closesocket, connect as bth_connect, ioctlsocket, listen as winsock_listen,
+        recv, send, socket, WSAGetLastError, WSAStartup, SEND_RECV_FLAGS, SOCKET, SOCK_STREAM,
+        WSADATA,
     };
 
     struct WinSocket(SOCKET);
@@ -538,7 +541,13 @@ mod native {
 
         fn set_nonblocking(&self, enabled: bool) -> std::io::Result<()> {
             let mode: u32 = u32::from(enabled);
-            let rc = unsafe { ioctlsocket(self.0, 0x8004_666E_u32 as i32, &mode as *const u32 as *mut u32) };
+            let rc = unsafe {
+                ioctlsocket(
+                    self.0,
+                    0x8004_666E_u32 as i32,
+                    &mode as *const u32 as *mut u32,
+                )
+            };
             if rc != 0 {
                 Err(std::io::Error::last_os_error())
             } else {
@@ -587,7 +596,9 @@ mod native {
             .split(':')
             .map(|part| u8::from_str_radix(part, 16))
             .collect::<std::result::Result<_, _>>()
-            .map_err(|_| CoreError::InvalidArgument(format!("invalid Bluetooth address '{value}'")))?;
+            .map_err(|_| {
+                CoreError::InvalidArgument(format!("invalid Bluetooth address '{value}'"))
+            })?;
         if bytes.len() != 6 {
             return Err(CoreError::InvalidArgument(format!(
                 "invalid Bluetooth address '{value}'"

@@ -8,7 +8,9 @@
 //!
 //! The virtual endpoint is not event driven: callers poll [`next`].
 
-use wasapi::{AudioCaptureClient, AudioClient, BufferInfo, Direction, SampleType, StreamMode, WaveFormat};
+use wasapi::{
+    AudioCaptureClient, AudioClient, BufferInfo, Direction, SampleType, StreamMode, WaveFormat,
+};
 
 use crate::format::{CHANNELS, SAMPLE_RATE};
 use crate::{CoreError, Result};
@@ -60,7 +62,11 @@ impl ProcessLoopback {
         let frames = match self.capture.get_next_packet_size() {
             Ok(Some(frames)) => frames as usize,
             Ok(None) => return Ok(false),
-            Err(e) => return Err(CoreError::Backend(format!("process loopback packet size: {e}"))),
+            Err(e) => {
+                return Err(CoreError::Backend(format!(
+                    "process loopback packet size: {e}"
+                )))
+            }
         };
         self.bytes.resize(frames * CHANNELS * BYTES_PER_SAMPLE, 0);
         let (read, info): (u32, BufferInfo) = self

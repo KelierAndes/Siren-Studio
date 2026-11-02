@@ -30,9 +30,9 @@ const BT_DUTY_CYCLE: u64 = 1;
 const BT_OPUS_BITRATE: i32 = 24_000;
 
 use crate::capture::{CaptureKind, CapturePipe, CaptureStats, ToneSource};
-use crate::format::{frames_for_ms, CHANNELS};
 use crate::engine::{CenterConfig, CenterEngine, CenterMode, SendCodec, SendSource};
 use crate::format::SAMPLE_RATE;
+use crate::format::{frames_for_ms, CHANNELS};
 use crate::metrics::now_us;
 use crate::net::discovery;
 use crate::net::udp::{FramePacker, UdpSender};
@@ -247,9 +247,7 @@ pub struct MeshEngine {
 }
 
 fn random_node_id() -> String {
-    let seed = now_us()
-        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-        ^ ((std::process::id() as u64) << 32);
+    let seed = now_us().wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ ((std::process::id() as u64) << 32);
     format!("{seed:016x}")
 }
 
@@ -259,9 +257,11 @@ fn random_node_id() -> String {
 fn node_id_path() -> Option<std::path::PathBuf> {
     #[cfg(windows)]
     {
-        std::env::var("LOCALAPPDATA")
-            .ok()
-            .map(|base| std::path::PathBuf::from(base).join("SirenStudio").join("node.id"))
+        std::env::var("LOCALAPPDATA").ok().map(|base| {
+            std::path::PathBuf::from(base)
+                .join("SirenStudio")
+                .join("node.id")
+        })
     }
     #[cfg(target_os = "linux")]
     {
@@ -694,7 +694,11 @@ fn run_mesh_sender(
     let mut bt_tick: u64 = 0;
     // N-1 forwarding: the hub builds one mix per Bluetooth destination that
     // contains every source except that destination's own audio.
-    let mix_ms = if config.frame_ms <= 5 { 10 } else { config.frame_ms };
+    let mix_ms = if config.frame_ms <= 5 {
+        10
+    } else {
+        config.frame_ms
+    };
     let mix_samples = frames_for_ms(mix_ms as f32) * CHANNELS;
     let mut mix_local: Vec<f32> = Vec::with_capacity(mix_samples * 2);
     let mut mix_encoders: HashMap<u64, FramePacker> = HashMap::new();
@@ -768,9 +772,7 @@ fn run_mesh_sender(
 
         let peer_snapshot: Vec<MeshPeer> = current
             .iter()
-            .filter(|(_, peer)| {
-                peer.pinned || peer.last_seen.elapsed() < PEER_UI_FRESHNESS
-            })
+            .filter(|(_, peer)| peer.pinned || peer.last_seen.elapsed() < PEER_UI_FRESHNESS)
             .map(|(_, peer)| MeshPeer {
                 name: peer.name.clone(),
                 id: peer.id.clone(),
@@ -814,11 +816,10 @@ fn run_mesh_sender(
                 mix_local.extend_from_slice(&pcm);
                 if mix_local.len() >= mix_samples {
                     let local = &mix_local[mix_local.len() - mix_samples..];
-                    let destinations = shared.mix_tap.snapshot(
-                        mix_samples,
-                        origin,
-                        Duration::from_millis(500),
-                    );
+                    let destinations =
+                        shared
+                            .mix_tap
+                            .snapshot(mix_samples, origin, Duration::from_millis(500));
                     if !destinations.is_empty() && !n1_logged {
                         n1_logged = true;
                         log::info!(

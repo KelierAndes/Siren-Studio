@@ -7,14 +7,14 @@
 
 pub mod tone;
 
-#[cfg(windows)]
-mod process_loopback;
-#[cfg(windows)]
-mod wasapi_capture;
 #[cfg(target_os = "android")]
 pub mod android_capture;
+#[cfg(windows)]
+mod process_loopback;
 #[cfg(target_os = "linux")]
 mod pulse_capture;
+#[cfg(windows)]
+mod wasapi_capture;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;

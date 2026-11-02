@@ -182,9 +182,7 @@ fn start_microphone() -> Result<CapturePipe> {
     let handle = thread::Builder::new()
         .name("siren-android-mic".into())
         .spawn(move || {
-            if let Err(message) =
-                run_microphone(producer, &thread_stats, &thread_stop, &ready_tx)
-            {
+            if let Err(message) = run_microphone(producer, &thread_stats, &thread_stop, &ready_tx) {
                 log::error!("mic capture stopped: {message}");
             }
         })

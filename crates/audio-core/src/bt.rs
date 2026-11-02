@@ -239,10 +239,7 @@ impl GapWindow {
         for (index, count) in self.buckets.iter().enumerate() {
             seen += count;
             if seen >= want {
-                return GAP_EDGES_MS
-                    .get(index)
-                    .copied()
-                    .unwrap_or(u32::MAX);
+                return GAP_EDGES_MS.get(index).copied().unwrap_or(u32::MAX);
             }
         }
         u32::MAX
@@ -322,7 +319,12 @@ impl Tunnel {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
-        let gap = self.stats.gap.lock().map(|gap| gap.clone()).unwrap_or_default();
+        let gap = self
+            .stats
+            .gap
+            .lock()
+            .map(|gap| gap.clone())
+            .unwrap_or_default();
         TunnelStatsSnapshot {
             links: self.stats.links.load(Ordering::Relaxed),
             tx_bytes: self.stats.tx_bytes.load(Ordering::Relaxed),
@@ -330,7 +332,11 @@ impl Tunnel {
             tx_packets: self.stats.tx_packets.load(Ordering::Relaxed),
             rx_packets: self.stats.rx_packets.load(Ordering::Relaxed),
             dropped: self.stats.dropped.load(Ordering::Relaxed),
-            last_rx_ms: if last == 0 { 0 } else { now.saturating_sub(last) },
+            last_rx_ms: if last == 0 {
+                0
+            } else {
+                now.saturating_sub(last)
+            },
             gap_samples: gap.samples,
             gap_p50_ms: gap.percentile(0.5),
             gap_p90_ms: gap.percentile(0.9),
@@ -350,11 +356,7 @@ impl Tunnel {
             return;
         }
         let keep = *links.keys().max().unwrap();
-        let extra: Vec<usize> = links
-            .keys()
-            .copied()
-            .filter(|id| *id != keep)
-            .collect();
+        let extra: Vec<usize> = links.keys().copied().filter(|id| *id != keep).collect();
         for id in &extra {
             if let Some(link) = links.remove(id) {
                 link.shutdown_link();
@@ -396,8 +398,7 @@ impl Tunnel {
         let n1 = Arc::new(AtomicBool::new(false));
         let uid = Arc::new(AtomicU64::new(config.node_uid));
         let stats = Arc::new(TunnelStats::default());
-        let links: Arc<Mutex<HashMap<usize, Box<dyn Link>>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let links: Arc<Mutex<HashMap<usize, Box<dyn Link>>>> = Arc::new(Mutex::new(HashMap::new()));
         let (event_tx, event_rx) = mpsc::channel::<Event>();
         let (command_tx, command_rx) = mpsc::channel::<Command>();
         let mut threads = Vec::new();
@@ -428,8 +429,7 @@ impl Tunnel {
                     while !udp_stop.load(Ordering::Relaxed) {
                         match udp_reader.recv_from(&mut buffer) {
                             Ok((len, _)) => {
-                                let Some((dest, payload)) =
-                                    parse_local_datagram(&buffer[..len])
+                                let Some((dest, payload)) = parse_local_datagram(&buffer[..len])
                                 else {
                                     continue;
                                 };
@@ -765,7 +765,11 @@ impl Tunnel {
         if let Some(link) = self.links.lock().unwrap().remove(&id) {
             link.shutdown_link();
         }
-        let _ = self.commands.lock().unwrap().send(Command::CloseLink { id });
+        let _ = self
+            .commands
+            .lock()
+            .unwrap()
+            .send(Command::CloseLink { id });
     }
 }
 
@@ -893,12 +897,7 @@ fn attach_link(
 fn read_exact(link: &mut dyn Link, mut buffer: &mut [u8]) -> std::io::Result<()> {
     while !buffer.is_empty() {
         match link.read_link(buffer) {
-            Ok(0) => {
-                return Err(std::io::Error::new(
-                    ErrorKind::UnexpectedEof,
-                    "link closed",
-                ))
-            }
+            Ok(0) => return Err(std::io::Error::new(ErrorKind::UnexpectedEof, "link closed")),
             Ok(read) => buffer = &mut buffer[read..],
             Err(error) if error.kind() == ErrorKind::Interrupted => {}
             Err(error) => return Err(error),
@@ -910,12 +909,7 @@ fn read_exact(link: &mut dyn Link, mut buffer: &mut [u8]) -> std::io::Result<()>
 fn write_all(link: &mut dyn Link, mut buffer: &[u8]) -> std::io::Result<()> {
     while !buffer.is_empty() {
         match link.write_link(buffer) {
-            Ok(0) => {
-                return Err(std::io::Error::new(
-                    ErrorKind::WriteZero,
-                    "link closed",
-                ))
-            }
+            Ok(0) => return Err(std::io::Error::new(ErrorKind::WriteZero, "link closed")),
             Ok(written) => buffer = &buffer[written..],
             Err(error) if error.kind() == ErrorKind::Interrupted => {}
             Err(error) => return Err(error),
@@ -940,7 +934,10 @@ impl Drop for Tunnel {
 enum Event {
     /// Locally produced audio. `dest` selects the destination leaf's origin
     /// (N-1 mix); `None` broadcasts to every link.
-    Local { dest: Option<u64>, payload: Vec<u8> },
+    Local {
+        dest: Option<u64>,
+        payload: Vec<u8>,
+    },
     Link(usize, Envelope),
     LinkClosed(usize),
 }
@@ -1030,7 +1027,11 @@ impl Seen {
         let Some((origin, stream_id, sequence)) = crate::protocol::frame_identity(payload) else {
             return true;
         };
-        let key = (if origin != 0 { origin } else { envelope.origin }, stream_id, sequence);
+        let key = (
+            if origin != 0 { origin } else { envelope.origin },
+            stream_id,
+            sequence,
+        );
         if !self.set.insert(key) {
             return false;
         }
@@ -1052,11 +1053,7 @@ mod tests {
     fn gap_window_keeps_the_shape_of_the_stream() {
         let mut window = GapWindow::default();
         for index in 0..900u64 {
-            window.record(
-                Duration::from_millis(5),
-                100,
-                1_000_000 + index * 5_000,
-            );
+            window.record(Duration::from_millis(5), 100, 1_000_000 + index * 5_000);
         }
         // One 3 s stall must show up in the tail, not average away into the
         // byte counters — that is the whole point of the gauge.
@@ -1183,7 +1180,10 @@ mod tunnel_tests {
             .expect("timeout");
         let mut magic = [0u8; 1];
         client.read_exact(&mut magic).expect("magic");
-        assert_eq!(magic[0], MAGIC_COMPACT, "writer must emit a compact envelope");
+        assert_eq!(
+            magic[0], MAGIC_COMPACT,
+            "writer must emit a compact envelope"
+        );
         let mut head = [0u8; HEADER_LEN_COMPACT - 1];
         client.read_exact(&mut head).expect("head");
         let len = u16::from_le_bytes([head[0], head[1]]) as usize;

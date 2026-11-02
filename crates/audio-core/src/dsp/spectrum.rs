@@ -38,8 +38,7 @@ impl SpectrumAnalyzer {
             let f0 = MIN_HZ * (MAX_HZ / MIN_HZ).powf(t0);
             let f1 = MIN_HZ * (MAX_HZ / MIN_HZ).powf(t1);
             let b0 = ((f0 * FFT_SIZE as f32 / SAMPLE_RATE).floor() as usize).max(1);
-            let b1 = ((f1 * FFT_SIZE as f32 / SAMPLE_RATE).ceil() as usize)
-                .min(FFT_SIZE / 2);
+            let b1 = ((f1 * FFT_SIZE as f32 / SAMPLE_RATE).ceil() as usize).min(FFT_SIZE / 2);
             band_bins.push((b0, b1.max(b0)));
         }
         Self {

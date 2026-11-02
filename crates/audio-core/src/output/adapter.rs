@@ -1,9 +1,9 @@
 //! Shared mixer→device rendering adapter: pulls from the mixer on demand and
 //! linearly resamples/maps 48 kHz stereo into whatever the endpoint accepts.
 
-use cpal::{FromSample, Sample};
 use crate::dsp::Mixer;
 use crate::format::{CHANNELS, SAMPLE_RATE};
+use cpal::{FromSample, Sample};
 
 pub(crate) struct OutputAdapter {
     mixer: Mixer,
@@ -101,4 +101,3 @@ impl OutputAdapter {
 pub(crate) fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
-

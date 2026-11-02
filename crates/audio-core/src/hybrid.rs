@@ -108,7 +108,11 @@ impl HybridNode {
             .clone()
             .unwrap_or_else(|| Arc::new(NativeBt));
         let enabled = options.config.bt_enabled && transport.available();
-        let local_address = if enabled { transport.local_address() } else { None };
+        let local_address = if enabled {
+            transport.local_address()
+        } else {
+            None
+        };
         if enabled {
             mesh_config.bt = local_address.clone();
             mesh_config.bt_channel = Some(options.config.bt_channel);
@@ -130,8 +134,16 @@ impl HybridNode {
         }
         mesh.set_bt_status(BtStatus {
             enabled,
-            role: if enabled { "waiting".into() } else { "off".into() },
-            state: if enabled { "waiting".into() } else { "off".into() },
+            role: if enabled {
+                "waiting".into()
+            } else {
+                "off".into()
+            },
+            state: if enabled {
+                "waiting".into()
+            } else {
+                "off".into()
+            },
             local_addr: local_address.clone(),
             channel: options.config.bt_channel,
             ..BtStatus::default()
@@ -161,14 +173,7 @@ impl HybridNode {
                     .name("siren-hybrid".into())
                     .spawn(move || {
                         supervise(
-                            mesh,
-                            tunnel,
-                            transport,
-                            channel,
-                            local,
-                            state_path,
-                            shared,
-                            stop,
+                            mesh, tunnel, transport, channel, local, state_path, shared, stop,
                         )
                     })
                     .map_err(|e| CoreError::Backend(format!("spawn hybrid: {e}")))?,
@@ -305,11 +310,9 @@ fn unix_secs() -> u64 {
 fn default_state_path() -> Option<PathBuf> {
     #[cfg(windows)]
     {
-        std::env::var("LOCALAPPDATA").ok().map(|base| {
-            PathBuf::from(base)
-                .join("SirenStudio")
-                .join("hub.json")
-        })
+        std::env::var("LOCALAPPDATA")
+            .ok()
+            .map(|base| PathBuf::from(base).join("SirenStudio").join("hub.json"))
     }
     #[cfg(target_os = "linux")]
     {
@@ -381,8 +384,7 @@ fn supervise(
     // TTL blacklist: a device that refused RFCOMM channel 16 is skipped for a
     // while so repeated inquiries walk further down the list instead of
     // retrying the same accessories forever.
-    let bad_candidates: Arc<Mutex<HashMap<String, Instant>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let bad_candidates: Arc<Mutex<HashMap<String, Instant>>> = Arc::new(Mutex::new(HashMap::new()));
 
     // Remembered hubs this node is allowed to dial: only one with a smaller uid,
     // i.e. one that is the hub by election. Dialing a larger-uid peer would make
@@ -401,21 +403,20 @@ fn supervise(
     // node ids are random per process, so hub.json can remember an identity that
     // no longer belongs to that address — dialing on the stale uid made the hub
     // call the very leaf that was calling it.
-    let live_dial_targets = |remembered: &[RememberedHub],
-                             topology: &[TopologyPeer]|
-     -> Vec<RememberedHub> {
-        remembered
-            .iter()
-            .filter(|entry| {
-                topology
-                    .iter()
-                    .find(|peer| peer.bt.as_deref() == Some(entry.bt.as_str()))
-                    .map(|peer| peer.uid != 0 && peer.uid < self_uid)
-                    .unwrap_or(false)
-            })
-            .cloned()
-            .collect()
-    };
+    let live_dial_targets =
+        |remembered: &[RememberedHub], topology: &[TopologyPeer]| -> Vec<RememberedHub> {
+            remembered
+                .iter()
+                .filter(|entry| {
+                    topology
+                        .iter()
+                        .find(|peer| peer.bt.as_deref() == Some(entry.bt.as_str()))
+                        .map(|peer| peer.uid != 0 && peer.uid < self_uid)
+                        .unwrap_or(false)
+                })
+                .cloned()
+                .collect()
+        };
 
     while !stop.load(Ordering::Relaxed) {
         let topology = mesh.topology();
@@ -432,9 +433,8 @@ fn supervise(
         // A live leaf link pins the current role: mDNS churn (a desktop
         // momentarily missing from the topology) must never drag a working
         // link to a different, non-listening node.
-        let pinned = !acting_hub
-            && tunnel.link_count() > 0
-            && shared.linked.lock().unwrap().is_some();
+        let pinned =
+            !acting_hub && tunnel.link_count() > 0 && shared.linked.lock().unwrap().is_some();
         if pinned {
             // keep current_hub/offline state exactly as it is
         } else if acting_hub {
@@ -476,8 +476,7 @@ fn supervise(
                 match elected {
                     Some(hub) if hub.id != self_id => {
                         let already_linked = tunnel.link_count() > 0
-                            && shared.linked.lock().unwrap().as_deref()
-                                == Some(hub.bt.as_str());
+                            && shared.linked.lock().unwrap().as_deref() == Some(hub.bt.as_str());
                         if !already_linked {
                             log::info!("hybrid: leaf link to hub {} ({})", hub.name, hub.bt);
                             tunnel.clear_links();
@@ -579,7 +578,11 @@ fn supervise(
                     .into_iter()
                     .next()
                     .expect("live_dialable was checked above");
-                log::info!("hybrid: hub retries known hub {} ({})", entry.name, entry.bt);
+                log::info!(
+                    "hybrid: hub retries known hub {} ({})",
+                    entry.name,
+                    entry.bt
+                );
                 shared.connecting.store(true, Ordering::Relaxed);
                 let transport = transport.clone();
                 let tunnel = tunnel.clone();
@@ -618,12 +621,7 @@ fn supervise(
                     Ok(listener) => {
                         let listener: Arc<dyn BtListener> = Arc::from(listener);
                         *shared.listener.lock().unwrap() = Some(listener.clone());
-                        spawn_listener(
-                            listener,
-                            tunnel.clone(),
-                            shared.clone(),
-                            stop.clone(),
-                        );
+                        spawn_listener(listener, tunnel.clone(), shared.clone(), stop.clone());
                         log::info!("hybrid: hub on RFCOMM channel {channel}");
                         last_error = None;
                     }
@@ -653,14 +651,12 @@ fn supervise(
                 ready
             };
             if shared.dial_failures.load(Ordering::Relaxed) >= 3 {
-                log::info!(
-                    "hybrid: hub {} refuses connections, re-electing",
-                    hub.name
-                );
+                log::info!("hybrid: hub {} refuses connections, re-electing", hub.name);
                 shared.dial_failures.store(0, Ordering::Relaxed);
                 current_hub = None;
             }
-            if tunnel.link_count() == 0 && dial_ready && !shared.connecting.load(Ordering::Relaxed) {
+            if tunnel.link_count() == 0 && dial_ready && !shared.connecting.load(Ordering::Relaxed)
+            {
                 shared.connecting.store(true, Ordering::Relaxed);
                 let transport = transport.clone();
                 let tunnel = tunnel.clone();
@@ -729,10 +725,7 @@ fn supervise(
             // Scan only when there is nothing to dial: probing random
             // accessories takes seconds each and must never preempt retrying
             // the remembered hub (that turned a 3 s reconnect into 30 s).
-            if scan_due
-                && !shared.scanning.load(Ordering::Relaxed)
-                && remembered.is_empty()
-            {
+            if scan_due && !shared.scanning.load(Ordering::Relaxed) && remembered.is_empty() {
                 last_scan = Some(Instant::now());
                 shared.scanning.store(true, Ordering::Relaxed);
                 let transport = transport.clone();
@@ -745,10 +738,7 @@ fn supervise(
                     .name("siren-bt-scan".into())
                     .spawn(move || {
                         let devices = transport.scan(6);
-                        log::info!(
-                            "hybrid: inquiry found {} device(s)",
-                            devices.len()
-                        );
+                        log::info!("hybrid: inquiry found {} device(s)", devices.len());
                         // Only a few devices in range answer RFCOMM channel 16;
                         // probing is the identification, so keep it bounded.
                         let mut probes = 0u32;
@@ -756,8 +746,7 @@ fn supervise(
                             if probes >= 6 {
                                 break;
                             }
-                            if device.address.eq_ignore_ascii_case(&own)
-                                || tunnel.link_count() > 0
+                            if device.address.eq_ignore_ascii_case(&own) || tunnel.link_count() > 0
                             {
                                 continue;
                             }
@@ -772,13 +761,9 @@ fn supervise(
                                 }
                                 bad.remove(&device.address);
                             }
-                                probes += 1;
-                                log::info!(
-                                    "hybrid: probing {} ({})",
-                                    device.address,
-                                    device.name
-                                );
-                                match transport.connect(&device.address, channel) {
+                            probes += 1;
+                            log::info!("hybrid: probing {} ({})", device.address, device.name);
+                            match transport.connect(&device.address, channel) {
                                 Ok(link) => {
                                     let Ok(id) = tunnel.add_link(Box::new(link)) else {
                                         continue;
@@ -806,8 +791,7 @@ fn supervise(
                                             at: unix_secs(),
                                         };
                                         remember_hub(&state_path, &memory);
-                                        *shared_scan.discovered.lock().unwrap() =
-                                            Some(memory);
+                                        *shared_scan.discovered.lock().unwrap() = Some(memory);
                                         break;
                                     }
                                     tunnel.remove_link(id);
@@ -869,8 +853,7 @@ fn supervise(
                         ) {
                             Ok(_) => {
                                 connected.dial_failures.store(0, Ordering::Relaxed);
-                                *connected.linked.lock().unwrap() =
-                                    Some(entry.bt.clone());
+                                *connected.linked.lock().unwrap() = Some(entry.bt.clone());
                                 remember_hub(&memory_path, &entry);
                             }
                             Err(error) => {
@@ -898,10 +881,8 @@ fn supervise(
             // traffic is actually flowing. Report the send side and the write
             // drops next to them, and say how much was received.
             let seconds = last_quality_log.elapsed().as_secs_f64().max(1.0);
-            let tx_kb_s =
-                stats.tx_bytes.saturating_sub(last_quality_tx) as f64 / 1024.0 / seconds;
-            let rx_kb_s =
-                stats.rx_bytes.saturating_sub(last_quality_rx) as f64 / 1024.0 / seconds;
+            let tx_kb_s = stats.tx_bytes.saturating_sub(last_quality_tx) as f64 / 1024.0 / seconds;
+            let rx_kb_s = stats.rx_bytes.saturating_sub(last_quality_rx) as f64 / 1024.0 / seconds;
             last_quality_tx = stats.tx_bytes;
             last_quality_rx = stats.rx_bytes;
             last_quality_log = Instant::now();
@@ -971,16 +952,14 @@ fn supervise(
         let hub_for_status = if acting_hub {
             None
         } else {
-            current_hub
-                .clone()
-                .or_else(|| {
-                    remembered_hub.clone().map(|hub| Candidate {
-                        uid: uid_of(&hub.id),
-                        id: hub.id,
-                        name: hub.name,
-                        bt: hub.bt,
-                    })
+            current_hub.clone().or_else(|| {
+                remembered_hub.clone().map(|hub| Candidate {
+                    uid: uid_of(&hub.id),
+                    id: hub.id,
+                    name: hub.name,
+                    bt: hub.bt,
                 })
+            })
         };
         let state = if acting_hub {
             "listening"
@@ -1064,7 +1043,10 @@ fn dial_with_backoff(
         if result.is_ok() {
             return Ok(());
         }
-        log::debug!("hybrid: dial {address} failed in {:.0} ms backoff", delay_ms);
+        log::debug!(
+            "hybrid: dial {address} failed in {:.0} ms backoff",
+            delay_ms
+        );
     }
     result
 }

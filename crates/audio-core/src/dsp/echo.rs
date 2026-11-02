@@ -160,7 +160,11 @@ impl Nlms {
         let mut acc = 0.0f32;
         let mut index = position;
         for tap in taps.iter() {
-            index = if index == 0 { FILTER_TAPS - 1 } else { index - 1 };
+            index = if index == 0 {
+                FILTER_TAPS - 1
+            } else {
+                index - 1
+            };
             acc += tap * hist[index];
         }
         acc
@@ -190,7 +194,11 @@ impl Nlms {
         let step = mu / power;
         let mut index = self.position;
         for tap in 0..FILTER_TAPS {
-            index = if index == 0 { FILTER_TAPS - 1 } else { index - 1 };
+            index = if index == 0 {
+                FILTER_TAPS - 1
+            } else {
+                index - 1
+            };
             self.taps_l[tap] += step * error_l * self.hist_l[index];
             self.taps_r[tap] += step * error_r * self.hist_r[index];
         }
@@ -452,9 +460,12 @@ impl EchoCanceller {
                 }
             }
             // The delay moved: track it locally first (±20 ms).
-            if let Some((score, offset)) =
-                self.search_offsets(&inner, previous, LOCAL_SEARCH_FRAMES, LOCK_STEP_COARSE as i64)
-            {
+            if let Some((score, offset)) = self.search_offsets(
+                &inner,
+                previous,
+                LOCAL_SEARCH_FRAMES,
+                LOCK_STEP_COARSE as i64,
+            ) {
                 if score >= MIN_CORRELATION {
                     self.apply_lock(offset, score, monitor_now, capture_now, &inner);
                     return;
@@ -473,7 +484,10 @@ impl EchoCanceller {
             }
             lag += LOCK_STEP_COARSE;
         }
-        let best = scores.iter().map(|(_, score)| *score).fold(f32::MIN, f32::max);
+        let best = scores
+            .iter()
+            .map(|(_, score)| *score)
+            .fold(f32::MIN, f32::max);
         if best < MIN_CORRELATION {
             return;
         }
@@ -615,12 +629,11 @@ mod tests {
     /// The monitor ring is process-global; tests must not interleave.
     static SERIAL: Mutex<()> = Mutex::new(());
 
-
     fn tone_block(phase: &mut f64, frames: usize) -> Vec<f32> {
         let mut out = Vec::with_capacity(frames * CHANNELS);
         for _ in 0..frames {
-            let value = ((*phase * std::f64::consts::TAU * 440.0 / SAMPLE_RATE as f64).sin()
-                * 0.3) as f32;
+            let value =
+                ((*phase * std::f64::consts::TAU * 440.0 / SAMPLE_RATE as f64).sin() * 0.3) as f32;
             *phase += 1.0;
             out.push(value);
             out.push(value);
