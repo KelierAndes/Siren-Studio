@@ -9,3 +9,6 @@ __pycache__/
 ui_debug.log
 /NVIDIA Corporation/
 .qoder/
+
+# release artifacts
+dist/
