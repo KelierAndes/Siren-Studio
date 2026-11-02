@@ -172,7 +172,7 @@ final[i] = tanh(out[i] · master_gain)
 - 新流：创建 1 s 环缓冲、`StreamMetrics`、`StreamChannel`，通过 `MixerHandle::add` 交给音频线程。
 - 流身份：`PeerKey = (origin, 来源地址, stream_id)`；`seq` 台账按这个 key 各自维护，所以两个载波会各自成流，靠下一条的**载体仲裁**保证同一帧不会被播两遍。
 - 序号：`wrapping_sub` 得到有符号差值。
-  - 重复/倒退（`LATE_DUPLICATE_LIMIT = -250 000` 帧以内，约 5 s）：丢弃，不碰解码器。
+  - 重复/倒退（`LATE_DUPLICATE_LIMIT = -250 000` 个序号，seq 按包递增，5 ms/包 ≈ 21 分钟）：丢弃，不碰解码器。
   - 倒退超出该窗口（或序号真正回绕）：视为发送端重启，重置解码器。
   - 间隔 > 1：按帧长计算丢帧。
     - Raw：补零，单次上限 100 ms。
