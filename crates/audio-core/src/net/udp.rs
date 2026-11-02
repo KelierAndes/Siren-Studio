@@ -805,6 +805,16 @@ fn run(
                 }
                 let tap_bt =
                     is_bt && now.duration_since(peer.last_wifi_seen) > Duration::from_millis(300);
+                // The Bluetooth copy is a backup, not a second audio source.
+                // Both carriers push into the same ring, so whichever arrives
+                // first wins the sequence and the other is dropped as a
+                // duplicate — letting Bluetooth win splices its 24 kbps Opus
+                // into an otherwise raw stream, one 5 ms packet at a time.
+                // Ignore it entirely until Wi-Fi has actually stalled.
+                let is_local = is_bt && addr.port() == config.bind.port();
+                if is_bt && !is_local && !tap_bt {
+                    continue;
+                }
 
                 // Sequence bookkeeping: duplicate / reordering / loss.
                 //
