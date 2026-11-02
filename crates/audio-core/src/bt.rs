@@ -467,6 +467,11 @@ impl Tunnel {
                 .spawn(move || {
                     let mut seen = Seen::new();
                     let mut writers: HashMap<usize, LinkWriter> = HashMap::new();
+                    // Last time this node pushed bytes *out* on a link. A leaf's
+                    // downlink is idle by design while its Wi-Fi works, so inbound
+                    // silence alone does not prove the link is dead — closing it
+                    // anyway made every leaf re-dial on a ~35 s timer.
+                    let mut last_out: HashMap<usize, Instant> = HashMap::new();
                     let mut link_origins: HashMap<usize, (u64, Instant)> = HashMap::new();
                     let mut attached_at: HashMap<usize, Instant> = HashMap::new();
                     let mut window: u64 = 0;
@@ -484,6 +489,7 @@ impl Tunnel {
                             Ok(Command::CloseLink { id }) => {
                                 writers.remove(&id);
                                 attached_at.remove(&id);
+                                last_out.remove(&id);
                                 relay_stats.links.store(writers.len(), Ordering::Relaxed);
                             }
                             Err(mpsc::TryRecvError::Empty) => {}
@@ -536,7 +542,9 @@ impl Tunnel {
                                     let Some(writer) = writers.get_mut(&id) else {
                                         continue;
                                     };
-                                    writer.offer(bytes.clone());
+                                    if writer.offer(bytes.clone()) {
+                                        last_out.insert(id, Instant::now());
+                                    }
                                     if let Some(skip) = writer.maybe_throttle(window, id) {
                                         if skip > 0 {
                                             log::info!("bt: link {id} congested, sending 1/{}", skip + 1);
@@ -554,6 +562,7 @@ impl Tunnel {
                                 arrivals.remove(&id);
                                 writers.remove(&id);
                                 link_origins.remove(&id);
+                                last_out.remove(&id);
                                 if let Some(link) = relay_links.lock().unwrap().remove(&id) {
                                     link.shutdown_link();
                                 }
@@ -613,6 +622,7 @@ impl Tunnel {
                                             writers.remove(&old);
                                             link_origins.remove(&old);
                                             attached_at.remove(&old);
+                                            last_out.remove(&old);
                                             if let Some(link) =
                                                 relay_links.lock().unwrap().remove(&old)
                                             {
@@ -677,27 +687,41 @@ impl Tunnel {
                             if let Ok(mut published) = relay_stats.gap.lock() {
                                 *published = std::mem::take(&mut gauge);
                             }
+                            // Inbound silence alone is not proof of a dead link:
+                            // this node may still be feeding it. Only a link that
+                            // moved nothing either way is aged out — closing a
+                            // served-by-Wi-Fi standby made the peer re-dial.
+                            let fed = |id: &usize, quiet: Duration| {
+                                last_out
+                                    .get(id)
+                                    .is_some_and(|out| out.elapsed() < quiet)
+                            };
                             let stale: Vec<usize> = link_origins
                                 .iter()
-                                .filter(|(_, (_, at))| {
-                                    at.elapsed() >= Duration::from_secs(10)
+                                .filter(|(id, (_, at))| {
+                                    at.elapsed() >= Duration::from_secs(10) && !fed(*id, Duration::from_secs(10))
                                 })
                                 .map(|(id, _)| *id)
                                 .collect();
-                            // Links that never delivered a single frame are
-                            // leftover half-open ACLs; they have no origin
-                            // timestamp to age out, so close them by age.
+                            // Links that never moved a single frame in either
+                            // direction are leftover half-open ACLs; they have no
+                            // origin timestamp to age out, so close them by age.
+                            // Outbound flow counts: a leaf that is happily served
+                            // by Wi-Fi still pushes its own audio down the RFCOMM
+                            // pipe and receives nothing back.
                             let orphans: Vec<usize> = attached_at
                                 .iter()
                                 .filter(|(id, at)| {
                                     at.elapsed() >= Duration::from_secs(30)
                                         && !link_origins.contains_key(id)
+                                        && !fed(*id, Duration::from_secs(30))
                                 })
                                 .map(|(id, _)| *id)
                                 .collect();
                             for id in orphans {
                                 writers.remove(&id);
                                 attached_at.remove(&id);
+                                last_out.remove(&id);
                                 if let Some(link) = relay_links.lock().unwrap().remove(&id) {
                                     link.shutdown_link();
                                 }
@@ -707,6 +731,7 @@ impl Tunnel {
                                 writers.remove(&id);
                                 attached_at.remove(&id);
                                 link_origins.remove(&id);
+                                last_out.remove(&id);
                                 if let Some(link) = relay_links.lock().unwrap().remove(&id) {
                                     link.shutdown_link();
                                 }

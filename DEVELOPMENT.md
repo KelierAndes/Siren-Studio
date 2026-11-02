@@ -326,6 +326,25 @@ bt: link quality: 2 link(s), tx 0.0 KB/s, rx 11.7 KB/s, write drops 0,
 - **量测自身的假警报已修正**：叶子在 Wi-Fi 健康时下行按设计为空，早期版本把"窗口内无到达"合成成一条 5 s 停顿，把健康网络读成故障；现在如实报 `samples=0` 并写明"idle by design while Wi-Fi works"。
 - **被量测否决的备选方案**：蓝牙降级 16 kbps 单声道。实测空口负载只有 7.8 + 5.8 KB/s（基线上限 34–40 KB/s）且无停顿，省下 ~1 KB/s 治不了混音饥饿；而且它需要新的 codec 标记（Opus 裸包不自描述声道数，`decoders[2]` 要扩成 3 槽），成本不小。**下一步应查混音路径本身**：混音帧长 10 ms 与流帧长 5 ms 的时间基差异、以及掩码仲裁清空混音缓冲的时机。
 
+### 链路被自己的扫描拆掉：手机↔PC 反复切换（2026-11-02）
+
+用户报告"手机与 PC 之间链路反复在 Wi-Fi 与蓝牙之间切换，手机→PC 经常中断且有严重噪点"。日志给出的现场：
+
+```
+16:40:24  bt: link 4 never carried audio, closed     ← 叶子自己把链路判死
+16:40:27  bt: pump ended: bt socket closed, read return: -1
+16:40:27  bt: dialing E0:8F:4C:16:9F:58 channel 16
+16:40:27  bt: channel connect failed (read ret: -1), trying SPP
+16:40:27  bt: dial failed                              ← 第一次重拨几乎必失败
+16:40:27  bt: dialing ... / bt: link 5 opened
+```
+
+- **不是 RF**：同一条链路上行 `tx 7.8 KB/s`、`gap p50 10 / p90 25 / p99 50 / max 77 ms`、`>500 ms 停顿 0`、`写丢弃 0`；接收侧 `lost 0 / underruns 0`。空口是健康的。
+- **根因是自己写的清理规则**：`bt.rs` 的扫描把"30 s 没收到音频帧"当成半开 ACL 关掉。但叶子在 Wi-Fi 健康时**下行按设计就是空的**（hub 不给它转发混音），于是每条备用链路活到 30 s 就被杀，手机立刻重拨 → 每 ~33–36 s 一次拆链/建链；hub 侧还要多一次 `duplicate link N closed`。PC 未入网的那几分钟里更夸张：7.5 分钟 86 次拨号、每次先失败再成功。
+- **修法**：链路活性改成**双向判定**——`last_out` 记录本端最后一次真正写出的时刻，只有"收也静、发也静"才老化。孤儿规则（30 s）与 `stale` 规则（曾收到过一帧、之后 10 s 静默）都加同一道判据；真死的链路仍由 socket 错误走 `Event::LinkClosed` 正常回收。
+- **验证（手机↔PC，两端都装新构建）**：17:11:44 一次拨通，到 17:17:05 共 **5 分 21 秒零拆链、零重拨**；PC 侧 `lost 0 / underruns 0 / resets 1`（resets 发生在入网瞬间），手机侧 `lost 0 / underruns 2`（同样只在入网时）。修复前同一窗口应有 9–10 次拆链。
+- **遗留**：入网头几秒仍会看到一次较大的 `seq gap`（PC 截图上 `丢帧 1920` = 40 ms），那是手机在 PC 入网前已经发出去的包被一次性对齐，不是稳态丢包；稳态 `lost 0`。若用户仍听到噪点，下一步 A/B 是**关掉手机蓝牙**再听——那能区分"切换遗留"与"手机侧 Wi-Fi/BT 同频共存"（PC 走有线，不受共存影响）。
+
 ### 图标字体（release 构建）
 
 - release 构建默认做 **图标树摇**；通过字段/记录间接传递的 `IconData` 可能被漏掉，导致按钮、面板标题、提示图标显示为空白。构建产物里的 `data/flutter_assets/fonts/MaterialIcons-Regular.otf` 若只有几 KB（完整字体约 1.6 MB）即可确认。
