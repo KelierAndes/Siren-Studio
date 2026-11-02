@@ -349,6 +349,11 @@ fn supervise(
 ) {
     let self_id = mesh.node_id().to_string();
     let self_name = mesh.name().to_string();
+    // Exactly one side of a pair may dial: the smaller uid listens, the larger
+    // dials. When both ends dial right after a teardown the pair gets two
+    // RFCOMM links, and the duplicate handling then keeps replacing the healthy
+    // one — that is the ~35 s link churn measured between PC and NAS.
+    let self_uid = mesh.uid();
     let state_path = state_path.clone();
     let mut acting_hub = false;
     let mut current_hub: Option<Candidate> = None;
@@ -376,10 +381,49 @@ fn supervise(
     let bad_candidates: Arc<Mutex<HashMap<String, Instant>>> =
         Arc::new(Mutex::new(HashMap::new()));
 
+    // Remembered hubs this node is allowed to dial: only one with a smaller uid,
+    // i.e. one that is the hub by election. Dialing a larger-uid peer would make
+    // both ends connect to each other at the same time.
+    let dial_targets = |remembered: &[RememberedHub]| -> Vec<RememberedHub> {
+        remembered
+            .iter()
+            .filter(|entry| {
+                let uid = uid_of(&entry.id);
+                uid != 0 && uid < self_uid
+            })
+            .cloned()
+            .collect()
+    };
+    // Same rule while mDNS is alive, but judged on the peer's *current* uid:
+    // node ids are random per process, so hub.json can remember an identity that
+    // no longer belongs to that address — dialing on the stale uid made the hub
+    // call the very leaf that was calling it.
+    let live_dial_targets = |remembered: &[RememberedHub],
+                             topology: &[TopologyPeer]|
+     -> Vec<RememberedHub> {
+        remembered
+            .iter()
+            .filter(|entry| {
+                topology
+                    .iter()
+                    .find(|peer| peer.bt.as_deref() == Some(entry.bt.as_str()))
+                    .map(|peer| peer.uid != 0 && peer.uid < self_uid)
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect()
+    };
+
     while !stop.load(Ordering::Relaxed) {
         let topology = mesh.topology();
         let (elected, candidates) = elect(&self_id, &self_name, local.as_deref(), &topology);
         let elected_self = elected.as_ref().map(|c| c.id == self_id).unwrap_or(false);
+        // A remembered hub is only worth dialing if it outranks us; otherwise
+        // we are the hub and it must come to us. While mDNS is alive the ranking
+        // uses the peer's current uid, because node ids are random per process
+        // and hub.json can remember an identity that no longer matches.
+        let dialable = !dial_targets(&remembered).is_empty();
+        let live_dialable = !live_dial_targets(&remembered, &topology).is_empty();
 
         // ---- decide role / hub with hysteresis -------------------------
         // A live leaf link pins the current role: mDNS churn (a desktop
@@ -448,7 +492,7 @@ fn supervise(
                         // Stay an offline leaf once connected: checking
                         // `link_count == 0` here made a connected leaf flip to
                         // hub on the next tick and tear its own link down.
-                        if solo && !was_hub && !remembered.is_empty() && !dial_failed {
+                        if solo && !was_hub && dialable && !dial_failed {
                             offline_leaf = true;
                         } else {
                             if dial_failed {
@@ -461,10 +505,19 @@ fn supervise(
                     }
                     None => {
                         // No mDNS topology (Wi-Fi gone): fall back to the hub
-                        // remembered from the last successful session.
-                        if !offline_leaf {
+                        // remembered from the last successful session — but only
+                        // when that hub outranks us. If it does not, we are the
+                        // hub and must listen; dialing anyway puts two RFCOMM
+                        // links on the same pair.
+                        if dialable {
+                            if !offline_leaf {
+                                tunnel.clear_links();
+                                offline_leaf = true;
+                            }
+                        } else {
                             tunnel.clear_links();
-                            offline_leaf = true;
+                            acting_hub = true;
+                            offline_leaf = false;
                         }
                     }
                 }
@@ -511,7 +564,7 @@ fn supervise(
                 was_hub = true;
                 set_was_hub(&state_path, true);
             }
-            if !remembered.is_empty()
+            if live_dialable
                 && tunnel.link_count() == 0
                 && !shared.connecting.load(Ordering::Relaxed)
                 && last_hub_redial
@@ -519,7 +572,10 @@ fn supervise(
                     .unwrap_or(true)
             {
                 last_hub_redial = Some(Instant::now());
-                let entry = remembered[0].clone();
+                let entry = live_dial_targets(&remembered, &topology)
+                    .into_iter()
+                    .next()
+                    .expect("live_dialable was checked above");
                 log::info!("hybrid: hub retries known hub {} ({})", entry.name, entry.bt);
                 shared.connecting.store(true, Ordering::Relaxed);
                 let transport = transport.clone();
@@ -775,7 +831,7 @@ fn supervise(
                     })
                     .ok();
             }
-            if !remembered.is_empty()
+            if dialable
                 && tunnel.link_count() == 0
                 && dial_ready
                 && !shared.connecting.load(Ordering::Relaxed)
@@ -783,8 +839,9 @@ fn supervise(
                     .map(|at| at.elapsed() >= Duration::from_secs(REMEMBERED_DIAL_SECS))
                     .unwrap_or(true)
             {
-                let entry = remembered[remembered_index % remembered.len()].clone();
-                remembered_index = (remembered_index + 1) % remembered.len();
+                let targets = dial_targets(&remembered);
+                let entry = targets[remembered_index % targets.len()].clone();
+                remembered_index = (remembered_index + 1) % targets.len();
                 last_remembered_attempt = Some(Instant::now());
                 log::info!(
                     "hybrid: offline, dialing remembered hub {} ({})",
@@ -946,7 +1003,9 @@ fn dial_with_backoff(
     const BACKOFF_MS: [u64; 4] = [0, 200, 600, 1_500];
     let mut result = Err(CoreError::Backend("dial cancelled".into()));
     for delay_ms in BACKOFF_MS {
-        if stop.load(Ordering::Relaxed) {
+        // A link may have arrived from the other side while we were waiting;
+        // dialing anyway would hand the peer a duplicate to sort out.
+        if stop.load(Ordering::Relaxed) || tunnel.link_count() > 0 {
             return result;
         }
         if delay_ms > 0 {

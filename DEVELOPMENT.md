@@ -298,6 +298,17 @@ EngineHandle::snapshot() -> (MasterSnapshot, Vec<StreamSnapshot>)
 - **C6 部署要求（已实现）**：`README.md`「无线部署要求」：5 GHz/有线、关闭 AP 隔离、保留组播、可选 DSCP/WMM 标记、手机省电模式的影响。
 - **仍未做**：C2 应用层 500 ms 单播心跳与 RTT/丢包测量（C1 之后收益下降，但切换决策仍需要它）、C4 Opus in-band FEC（当前只有 PLC，`codec.rs` 未设 `OPUS_SET_INBAND_FEC`/`PACKET_LOSS_PERC`）、C5 按到达间隔 P99 自适应水位（现在只有欠载 ±50 ms 闭环，上限 400 ms）、B5 取消主备状态机的并行双收、D1 BLE L2CAP CoC 验证、D2 hub 链路上限与链式接入（ttl/hop 中继是真实现的，但叶子被刻意禁止中继）、D3 hub 下行单路共享混音（现在是每链路一路 N−1 混音）、D5 帧聚合、D6 UI 频段检测。
 
+### 蓝牙链路抖动的归因与拨号定向（2026-11-02）
+
+`bt: duplicate link N ... closed` 每 ~35 s 一次曾被当作"中继误杀健康链路"。量出来是另一回事：
+
+- **两端同时拨号**：hub 选举按 uid 最小者，但 `random_node_id()` 用时间+pid 生成身份，**每次重启 uid 都变**——重启一次就重选中心、拆掉全部蓝牙链路，而 `hub.json` 里记的还是上一个进程的 id。于是"已知 hub"的 uid 是陈旧的：Linux 记着 ADMINISTRATOR 的旧 uid 比它小，就去做"hub 重试已知 hub"的拨号，而 ADMINISTRATOR 正作为叶子拨它——同一对设备同时建立两条 RFCOMM 链路。
+- **修法**：① 身份持久化——`MeshConfig.node_id` > `SIREN_NODE_ID` > 机器上的 `node.id`（Windows `%LOCALAPPDATA%\SirenStudio\node.id`、Linux `~/.cache/siren/node.id`、Android 由 FFI 传 filesDir 下的 `node.id`），实测 Linux `836c47c621873a1e`、PC `687ad46a475a5f7c` 重启后不变；② 只允许**大 uid 一侧拨号**，且 mDNS 在线时用拓扑里的**当前 uid** 判断（`live_dial_targets`），不在线才回落到 hub.json 的旧 id。
+- **试过并回退**：重复链路到达时改为"保留最近 300 ms 收过音频的那条、拒绝新来的"。半开链路在 hub 侧看起仍然健康、而叶子早已放弃它，于是新链路被拒 → 叶子立刻重拨（叠上 D4 的 200 ms 快速退避）→ 拨号风暴：~8 links/min、22 次载波切换。恢复为"新链路替换旧链路"，只在代码里留下这段结论：区分重复与重连需要链路自报身份，不是计时器能解决的。
+- **修后实测**（三端同版本、机器空闲、10 分钟窗口）：`duplicate link` **0 次**（此前 9 次/9 分钟）、`hub retries known hub` **0 次**（此前 0.4 次/分钟）、`audible gap` 0 次、无载波切换；链路建立仍是 1.8 次/分钟且结束时 `bt_links=0` —— 说明剩下的问题不是中继误杀，而是 **PC↔NAS 的 RFCOMM 链路本身建立不住**（#38），归 D 组。
+- 同窗口里 PC→hub 的 Wi-Fi 流 `lost 0`、欠载 0.12 次/秒、缓冲修剪 0.08 次/秒，与 2026-10-29 矩阵记录的 ~0.14 次/秒一致，非本次改动引入。
+- **D1（BLE L2CAP CoC）可行性**：Android 有明确的应用层 API（`BluetoothAdapter.listenUsingInsecureL2capChannel` / `BluetoothDevice.createInsecureL2capChannel`，API 29+），Linux 走 BlueZ 的 `AF_BLUETOOTH/BTPROTO_L2CAP`；**Windows 侧没有查到面向应用的 BLE CoC API**（Win32 `AF_BTH/BTPROTO_L2CAP` 面向 BR/EDR PSM，微软文档里能检索到的 CoC API 只有 Android 绑定）。因此 CoC 只能作为"手机↔Linux 叶子链路"的候选，桌面端仍得留在 RFCOMM/Wi-Fi 上——这条改造要动手前应先确认 Windows 的 API 面，否则三端异构反而增加链路种类。RFCOMM 的 `Link` 抽象确实可复用。
+
 ### 图标字体（release 构建）
 
 - release 构建默认做 **图标树摇**；通过字段/记录间接传递的 `IconData` 可能被漏掉，导致按钮、面板标题、提示图标显示为空白。构建产物里的 `data/flutter_assets/fonts/MaterialIcons-Regular.otf` 若只有几 KB（完整字体约 1.6 MB）即可确认。

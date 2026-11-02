@@ -68,6 +68,9 @@ pub struct MeshConfig {
     pub bt: Option<String>,
     /// RFCOMM channel advertised to peers.
     pub bt_channel: Option<u8>,
+    /// Stable node identity. `None` falls back to `SIREN_NODE_ID`, then to the
+    /// id persisted for this machine, then to a fresh random id.
+    pub node_id: Option<String>,
 }
 
 impl Default for MeshConfig {
@@ -92,6 +95,7 @@ impl Default for MeshConfig {
             bit: None,
             bt: None,
             bt_channel: None,
+            node_id: None,
         }
     }
 }
@@ -236,6 +240,53 @@ fn random_node_id() -> String {
     format!("{seed:016x}")
 }
 
+/// Where this machine keeps its node identity. Deliberately not next to
+/// `hub.json` on Linux: that one lives in `$XDG_RUNTIME_DIR` and vanishes on
+/// reboot, while the identity has to outlive both.
+fn node_id_path() -> Option<std::path::PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var("LOCALAPPDATA")
+            .ok()
+            .map(|base| std::path::PathBuf::from(base).join("SirenStudio").join("node.id"))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::env::var("HOME")
+            .ok()
+            .map(|home| std::path::PathBuf::from(home).join(".cache/siren/node.id"))
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        None
+    }
+}
+
+fn persisted_node_id() -> String {
+    persisted_node_id_in(node_id_path())
+}
+
+/// Read this node's identity from `path`, creating and storing one if absent.
+/// Public because Android picks its own storage directory in the FFI layer.
+pub fn persisted_node_id_in(path: Option<std::path::PathBuf>) -> String {
+    if let Some(path) = &path {
+        if let Ok(text) = std::fs::read_to_string(path) {
+            let id = text.trim().to_string();
+            if id.len() >= 16 && id.chars().all(|c| c.is_ascii_hexdigit()) {
+                return id;
+            }
+        }
+    }
+    let id = random_node_id();
+    if let Some(path) = &path {
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(path, &id);
+    }
+    id
+}
+
 /// Stable numeric identity for a node id string. Older builds produced
 /// 128-bit ids; the low 64 bits are enough and keep hub ordering stable.
 pub fn node_uid(node_id: &str) -> u64 {
@@ -264,13 +315,15 @@ impl MeshEngine {
                 "Opus supports 5/10/20/40/60 ms frames".into(),
             ));
         }
-        // Deterministic runs (tests, multi-device rigs) can pin the identity;
-        // otherwise a fresh random id is used. Hub election orders by uid, so
-        // pinning keeps the same device hub across restarts.
-        let node_id = std::env::var("SIREN_NODE_ID")
-            .ok()
-            .filter(|id| id.len() >= 16 && id.chars().all(|c| c.is_ascii_hexdigit()))
-            .unwrap_or_else(random_node_id);
+        // Identity order: explicit config (tests, multi-node rigs) > SIREN_NODE_ID
+        // > the id persisted for this machine > a fresh random id. A random id
+        // per process made every restart re-run the hub election, so the mesh
+        // picked a different hub and tore every Bluetooth link down.
+        let node_id = [config.node_id.clone(), std::env::var("SIREN_NODE_ID").ok()]
+            .into_iter()
+            .flatten()
+            .find(|id| id.len() >= 16 && id.chars().all(|c| c.is_ascii_hexdigit()))
+            .unwrap_or_else(persisted_node_id);
         let uid = node_uid(&node_id);
         let bit = config.bit.unwrap_or((uid % 64) as u8);
         let mix_tap = Arc::new(crate::net::udp::MixTap::new());
@@ -982,10 +1035,13 @@ mod tests {
     fn mesh_nodes_exchange_audio_without_manual_discovery() {
         // Node B: silent receiver. Node A pins B statically (discovery itself
         // needs live mDNS, exercised on real devices); B must hear A's tone.
+        // Both engines run in one process, so they must not share the machine
+        // identity file — pin distinct ids.
         let node_b = MeshEngine::start(MeshConfig {
             port: 0,
             output: false,
             advertise: false,
+            node_id: Some("1111111111111111".into()),
             ..Default::default()
         })
         .expect("start node b");
@@ -996,6 +1052,7 @@ mod tests {
             output: false,
             advertise: false,
             static_peers: vec![b_addr],
+            node_id: Some("2222222222222222".into()),
             ..Default::default()
         })
         .expect("start node a");

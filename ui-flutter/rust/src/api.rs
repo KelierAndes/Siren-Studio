@@ -352,11 +352,31 @@ fn status_idle() -> String {
 
 
 
+/// Identity each platform persists, so a restart does not re-run the hub
+/// election or invalidate the hub addresses peers remembered for us. Android
+/// keeps it in its own files dir; elsewhere audio-core picks the location.
+fn platform_node_id() -> Option<String> {
+    #[cfg(target_os = "android")]
+    {
+        let dir = android_java::state_dir()?;
+        return Some(audio_core::mesh::persisted_node_id_in(Some(
+            std::path::PathBuf::from(dir).join("node.id"),
+        )));
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        None
+    }
+}
+
 fn begin_start_mesh_inner(config_json: String) -> String {
-    let config: MeshConfig = match serde_json::from_str(&config_json) {
+    let mut config: MeshConfig = match serde_json::from_str(&config_json) {
         Ok(config) => config,
         Err(error) => return format!("invalid mesh config: {error}"),
     };
+    if config.node_id.is_none() {
+        config.node_id = platform_node_id();
+    }
     let dual: DualStackConfig = serde_json::from_str(&config_json).unwrap_or_default();
     let options = HybridOptions {
         config: HybridConfig {

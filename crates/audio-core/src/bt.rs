@@ -490,9 +490,18 @@ impl Tunnel {
                                 relay_stats.last_rx_us.store(now_us(), Ordering::Relaxed);
                                 if payload_origin != 0 {
                                     if relay_n1.load(Ordering::Relaxed) {
-                                        // A reconnect arrives as a new link;
-                                        // the previous one is stale even if
-                                        // its RFCOMM session lingers.
+                                        // A reconnect arrives as a new link; the
+                                        // previous one is stale even if its RFCOMM
+                                        // session lingers. Keeping the "fresher"
+                                        // link instead was tried and made things
+                                        // worse: a half-open link keeps looking
+                                        // alive here while the peer has given up on
+                                        // it, so the newcomer got rejected, the peer
+                                        // re-dialled immediately, and the pair
+                                        // churned ~8 links/min with constant
+                                        // carrier switches. Telling a duplicate
+                                        // from a reconnect needs the link to say
+                                        // who it is, not a timer.
                                         let old = link_origins
                                             .iter()
                                             .find(|(id, (origin, _))| {
