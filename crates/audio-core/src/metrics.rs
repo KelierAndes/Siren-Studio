@@ -63,6 +63,10 @@ pub struct StreamMetrics {
     pub underrun_blocks: AtomicU32,
     pub underrun_frames: AtomicU32,
     pub buffer_resets: AtomicU32,
+    /// How often this stream reached its start water level (warm-ups after a
+    /// join or a carrier-switch flush). The receiver pairs it with the switch
+    /// timestamps to measure how long a carrier switch mutes the stream.
+    pub starts: AtomicU32,
     pub packets: AtomicU64,
     pub lost_frames: AtomicU64,
     pub plc_frames: AtomicU64,
@@ -101,6 +105,7 @@ impl StreamMetrics {
             underrun_blocks: AtomicU32::new(0),
             underrun_frames: AtomicU32::new(0),
             buffer_resets: AtomicU32::new(0),
+            starts: AtomicU32::new(0),
             packets: AtomicU64::new(0),
             lost_frames: AtomicU64::new(0),
             plc_frames: AtomicU64::new(0),

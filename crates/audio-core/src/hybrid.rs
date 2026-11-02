@@ -525,15 +525,20 @@ fn supervise(
                 let transport = transport.clone();
                 let tunnel = tunnel.clone();
                 let connected = shared.clone();
+                let dial_stop = stop.clone();
                 thread::Builder::new()
                     .name("siren-bt-redial".into())
                     .spawn(move || {
-                        match transport.connect(&entry.bt, entry.channel) {
-                            Ok(link) => {
-                                if tunnel.add_link(Box::new(link)).is_ok() {
-                                    connected.dial_failures.store(0, Ordering::Relaxed);
-                                    *connected.linked.lock().unwrap() = Some(entry.bt.clone());
-                                }
+                        match dial_with_backoff(
+                            &transport,
+                            &tunnel,
+                            &entry.bt,
+                            entry.channel,
+                            &dial_stop,
+                        ) {
+                            Ok(_) => {
+                                connected.dial_failures.store(0, Ordering::Relaxed);
+                                *connected.linked.lock().unwrap() = Some(entry.bt.clone());
                             }
                             Err(error) => {
                                 log::debug!("hybrid: hub redial {}: {error}", entry.bt);
@@ -610,12 +615,12 @@ fn supervise(
                     at: unix_secs(),
                 };
                 let memory_path = state_path.clone();
+                let dial_stop = stop.clone();
                 thread::Builder::new()
                     .name("siren-bt-dial".into())
                     .spawn(move || {
-                        let result = transport
-                            .connect(&address, channel)
-                            .and_then(|link| tunnel.add_link(Box::new(link)));
+                        let result =
+                            dial_with_backoff(&transport, &tunnel, &address, channel, &dial_stop);
                         match &result {
                             Ok(_) => {
                                 connected.dial_failures.store(0, Ordering::Relaxed);
@@ -791,17 +796,22 @@ fn supervise(
                 let tunnel = tunnel.clone();
                 let connected = shared.clone();
                 let memory_path = state_path.clone();
+                let dial_stop = stop.clone();
                 thread::Builder::new()
                     .name("siren-bt-dial".into())
                     .spawn(move || {
-                        match transport.connect(&entry.bt, entry.channel) {
-                            Ok(link) => {
-                                if tunnel.add_link(Box::new(link)).is_ok() {
-                                    connected.dial_failures.store(0, Ordering::Relaxed);
-                                    *connected.linked.lock().unwrap() =
-                                        Some(entry.bt.clone());
-                                    remember_hub(&memory_path, &entry);
-                                }
+                        match dial_with_backoff(
+                            &transport,
+                            &tunnel,
+                            &entry.bt,
+                            entry.channel,
+                            &dial_stop,
+                        ) {
+                            Ok(_) => {
+                                connected.dial_failures.store(0, Ordering::Relaxed);
+                                *connected.linked.lock().unwrap() =
+                                    Some(entry.bt.clone());
+                                remember_hub(&memory_path, &entry);
                             }
                             Err(error) => {
                                 connected.dial_failures.fetch_add(1, Ordering::Relaxed);
@@ -919,6 +929,39 @@ fn supervise(
     if let Some(listener) = shared.listener.lock().unwrap().take() {
         listener.close();
     }
+}
+
+/// Dial a hub with a short escalating backoff. An RFCOMM link that just dropped
+/// normally comes back within a few hundred milliseconds, and waiting for the
+/// supervisor's next paced attempt would leave the mesh silent for seconds after
+/// every stall. The whole burst counts as one failure, so re-election timing is
+/// unchanged: a hub that is really gone is still given up on after three bursts.
+fn dial_with_backoff(
+    transport: &Arc<dyn BtTransport>,
+    tunnel: &Arc<Tunnel>,
+    address: &str,
+    channel: u8,
+    stop: &AtomicBool,
+) -> Result<()> {
+    const BACKOFF_MS: [u64; 4] = [0, 200, 600, 1_500];
+    let mut result = Err(CoreError::Backend("dial cancelled".into()));
+    for delay_ms in BACKOFF_MS {
+        if stop.load(Ordering::Relaxed) {
+            return result;
+        }
+        if delay_ms > 0 {
+            thread::sleep(Duration::from_millis(delay_ms));
+        }
+        result = transport
+            .connect(address, channel)
+            .and_then(|link| tunnel.add_link(Box::new(link)))
+            .map(|_| ());
+        if result.is_ok() {
+            return Ok(());
+        }
+        log::debug!("hybrid: dial {address} failed in {:.0} ms backoff", delay_ms);
+    }
+    result
 }
 
 fn spawn_listener(

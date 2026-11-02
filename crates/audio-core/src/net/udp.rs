@@ -69,6 +69,9 @@ const KNOWN_NORMAL_TTL: Duration = Duration::from_secs(60);
 /// A stream silent for longer than this is treated as stalled when it comes
 /// back with a large sequence jump.
 const CARRIER_STALL: Duration = Duration::from_millis(200);
+/// Longest gap between accepted packets worth reporting: below this the hole is
+/// smaller than one jitter buffer and is not heard as a mute.
+const AUDIBLE_MUTE: Duration = Duration::from_millis(500);
 const BT_TARGET_STREAK: u32 = 40;
 
 pub struct UdpSender {
@@ -539,11 +542,35 @@ struct Peer {
     bt_target_raised: bool,
     /// Current adaptive target for a Bluetooth-only carrier (ms).
     bt_target_ms: f32,
+    /// In-flight carrier switch, timed until the stream is audible again.
+    switch: Option<SwitchTrace>,
+    /// Rate limit for the "seq gap" evidence line: a lifetime cap hides the
+    /// very stalls the switch measurement is supposed to explain.
+    last_gap_log: Instant,
+    /// Rate limit for the "audible gap" line.
+    last_mute_log: Instant,
     analyzer: SpectrumAnalyzer,
     last_underruns: u32,
     last_target_check: Instant,
     last_target_decay: Instant,
     last_report: Instant,
+}
+
+/// One carrier switch measured end to end: how long nothing arrived at all
+/// (the link's fault) versus how long we spent re-filling the buffer (our
+/// fault). Without the split, a 5 s mute is indistinguishable from a 5 s stall
+/// and the fix gets guessed at.
+struct SwitchTrace {
+    from: &'static str,
+    to: &'static str,
+    /// Last packet on the old carrier; the mute starts here.
+    last_old_packet: Instant,
+    /// First packet accepted on the new carrier (the resync/flush point).
+    decided_at: Instant,
+    /// Warm-up count when the flush was issued.
+    starts_before: u32,
+    /// Silence we synthesized ourselves (zero-fill across a timeline jump), ms.
+    synth_ms: f64,
 }
 
 impl Peer {
@@ -796,6 +823,22 @@ fn run(
                 let switched =
                     is_bt != peer.last_path_bt || header.codec != peer.last_codec;
                 let stalled = peer.last_seen.elapsed() > CARRIER_STALL;
+                // What the listener actually loses: the span between two
+                // accepted packets. A carrier switch that keeps the sequence
+                // timeline continuous measures ~0 ms here, which is exactly the
+                // difference between "our switch logic is slow" and "the link
+                // was down".
+                let mute = peer.last_seen.elapsed();
+                if mute > AUDIBLE_MUTE && peer.last_mute_log.elapsed() >= Duration::from_secs(2) {
+                    peer.last_mute_log = Instant::now();
+                    log::info!(
+                        "udp: stream {} audible gap {:.0} ms before this {} packet (previous carrier {})",
+                        peer.id,
+                        mute.as_secs_f64() * 1000.0,
+                        if is_bt { "bt" } else { "wifi" },
+                        if peer.last_path_bt { "bt" } else { "wifi" },
+                    );
+                }
                 let mut gap = 0u32;
                 if let Some(last) = peer.last_seq {
                     let diff = header.seq.wrapping_sub(last) as i32;
@@ -813,6 +856,14 @@ fn run(
                         );
                         mixer.flush_stream(peer.id);
                         peer.last_seq = None;
+                        peer.switch = Some(SwitchTrace {
+                            from: if peer.last_path_bt { "bt" } else { "wifi" },
+                            to: if is_bt { "bt" } else { "wifi" },
+                            last_old_packet: peer.last_seen,
+                            decided_at: now,
+                            starts_before: peer.metrics.starts.load(Ordering::Relaxed),
+                            synth_ms: 0.0,
+                        });
                     } else if diff <= 0 {
                         if diff > LATE_DUPLICATE_LIMIT {
                             continue; // duplicate or reordered late packet
@@ -823,9 +874,8 @@ fn run(
                         peer.last_seq = None;
                     } else if diff > 1 {
                         gap = (diff - 1).min(20_000) as u32;
-                        static GAP_LOGS: std::sync::atomic::AtomicU64 =
-                            std::sync::atomic::AtomicU64::new(0);
-                        if gap > 50 && GAP_LOGS.fetch_add(1, Ordering::Relaxed) < 120 {
+                        if gap > 50 && peer.last_gap_log.elapsed() >= Duration::from_secs(2) {
+                            peer.last_gap_log = Instant::now();
                             log::warn!(
                                 "udp: seq gap {} -> {} ({} missing) from {} origin {:016x} stream {} codec {} {} B",
                                 last,
@@ -844,6 +894,22 @@ fn run(
                 let frame_frames = frames_for_ms(header.frame_ms as f32) as u32;
                 if gap > 0 {
                     let lost = gap.saturating_mul(frame_frames);
+                    // A timeline jump longer than a blink is what the user hears
+                    // as "the mesh went silent", whether or not we also flushed.
+                    // Start the same trace so the mute gets attributed.
+                    const AUDIBLE_GAP_MS: f64 = 400.0;
+                    let synth_ms =
+                        crate::format::ms_for_frames(lost as usize) as f64;
+                    if synth_ms > AUDIBLE_GAP_MS && peer.switch.is_none() {
+                        peer.switch = Some(SwitchTrace {
+                            from: if peer.last_path_bt { "bt" } else { "wifi" },
+                            to: if is_bt { "bt" } else { "wifi" },
+                            last_old_packet: peer.last_seen,
+                            decided_at: now,
+                            starts_before: peer.metrics.starts.load(Ordering::Relaxed),
+                            synth_ms,
+                        });
+                    }
                     if header.codec == Codec::Opus {
                         let concealed = peer.conceal(gap.min(MAX_PLC_PACKETS), frame_frames);
                         peer.metrics
@@ -996,6 +1062,36 @@ fn run(
                         } else {
                             peer.bt_streak = 0;
                         }
+
+                        // Step A of the dual-stack plan: report the switch only
+                        // once the stream is audible again, so the mute splits
+                        // into "nothing arrived" and "we were re-buffering".
+                        if let Some(trace) = peer.switch.take() {
+                            let started =
+                                peer.metrics.starts.load(Ordering::Relaxed) > trace.starts_before;
+                            if started {
+                                log::info!(
+                                    "udp: stream {} switch {} -> {} measured: {:.0} ms with no packet at all, {:.0} ms synthesized as silence, then {:.0} ms re-filling; total mute {:.0} ms (target {:.0} ms)",
+                                    peer.id,
+                                    trace.from,
+                                    trace.to,
+                                    trace.decided_at.duration_since(trace.last_old_packet).as_secs_f64() * 1000.0,
+                                    trace.synth_ms,
+                                    trace.decided_at.elapsed().as_secs_f64() * 1000.0,
+                                    trace.last_old_packet.elapsed().as_secs_f64() * 1000.0,
+                                    f32::from_bits(peer.metrics.target_ms.load(Ordering::Relaxed)),
+                                );
+                            } else if trace.decided_at.elapsed() > Duration::from_secs(15) {
+                                log::warn!(
+                                    "udp: stream {} switch {} -> {} never reached its start level within 15 s",
+                                    peer.id,
+                                    trace.from,
+                                    trace.to
+                                );
+                            } else {
+                                peer.switch = Some(trace);
+                            }
+                        }
                     }
                     Err(error) => {
                         stats.bad_packets.fetch_add(1, Ordering::Relaxed);
@@ -1112,6 +1208,9 @@ fn create_peer(
         last_codec: header.codec,
         bt_target_raised: bt_carrier,
         bt_target_ms: target_ms,
+        switch: None,
+        last_gap_log: Instant::now(),
+        last_mute_log: Instant::now(),
         analyzer: SpectrumAnalyzer::new(),
         last_underruns: 0,
         last_target_check: Instant::now(),

@@ -285,6 +285,19 @@ EngineHandle::snapshot() -> (MasterSnapshot, Vec<StreamSnapshot>)
 - 释放路径：`mesh_release_inner` 先在注册表锁内取出节点、在锁外 drop；`HybridNode::drop` 用后台 reaper 线程 join 监督线程（它可能正卡在 RFCOMM 连接里），避免释放卡住 UI 的状态轮询。
 - 实测（2026-11-02，Linux hub + Windows 桌面端 + Android 三端）：杀掉叶子设备后，两端各出现 `stream ... timed out` 与 `bt: link ... reader ended`，三端 `running` 保持 true、无 `MeshEngine dropped`、桌面端进程存活；桌面端真实点击“离开组网→加入组网”得到完整归因链（`ffi: mesh_stop(1)` → `hybrid/mesh/center: stop requested` → `ffi: mesh_release(1)` → `MeshEngine dropped` → `ffi: mesh 2 registered`）；WebUI 同样点击链为 `webui: leave requested` → `stop requested by tokio-rt-worker` → 重新入网 `center: ready`，看门狗未误触发。
 
+### 双栈切换与断连：改进项实施状态（2026-11-02）
+
+对照 `IMPROVEMENTS.md`（P1 双栈→纯蓝牙静默约 5 s、P2 Wi-Fi 间歇断连、P3 蓝牙多设备欠载）逐项核对并实施。**先做步骤 A 的测量，再决定 B 组是否值得做。**
+
+- **A 载波切换测量（已实现）**：`net/udp.rs` 的 `SwitchTrace` 记录「上一载波最后一包 → 判定切换 → 重新攒够水位出声」，并在每次接受包时检查两包之间的空档，超过 500 ms 记 `audible gap N ms before this bt|wifi packet`；切换完成记 `switch wifi -> bt measured: X ms with no packet at all, Y ms synthesized as silence, then Z ms re-filling; total mute …`。出声时刻由 `StreamMetrics.starts`（`dsp/mixer.rs` 里 `started` 的 false→true 边沿）判定。原先 `seq gap` 证据行有 120 次的进程生命周期上限，跑一会儿就不再打印，改为每流 2 s 节流。
+- **测量结果（Linux hub 收手机端流，3 轮断/复 Wi-Fi，共 6 次切换）**：**没有一次出现 ≥500 ms 的收包空档**，也没有触发 Flush/resync；合成静音累计 240 帧（10 ms）与 720 帧（30 ms）各一次，`underruns` 每轮 +2。即**双栈↔纯蓝牙的切换本身不产生可听静默**，P1 的"约 5 s"不来自 B 组（热备/预热/先出声/快速判定）。日志里 5–6 s 量级的是 RFCOMM 链路自身反复建立/超时（`bt: link N never carried audio, closed`、`reader ended`），归 D 组与 #38。
+- **B1 下行保活 / B2 备用载波预热 / B3 先出声后增缓冲 / B4 60–100 ms 快速判定：未实施**，理由是上面的测量。补充：B3 设想的"PI 数秒内把水位升到目标"在现有 ±0.2% 漂移上限下不成立——0.2% 消费差每秒只能攒 2 ms 音频，150 ms 要 75 s；要几秒升上去就得把消费速率偏 5%，等于可听的音高下沉，故不做。
+- **C1 发现与保活解耦（已实现）**：`mesh.rs` 的 `SendPeer` 增加 `last_seen`/`pinned`，mDNS 连续缺席不再 2 次（约 5.6 s）就删除对端并销毁 `UdpSender`，改为 `PEER_KEEPALIVE_TOLERANCE = 60 s` 内继续向记住的地址单播；`PEER_UI_FRESHNESS = 6 s` 之外的对端不进 UI 设备列表，所以设备数仍与原来一样及时。拓扑（角色选举用）每轮扫描重建，不受影响。
+- **C3 Android Wi-Fi 省电（部分实现）**：`MainActivity.kt` 在 `onStart` 与 MulticastLock 一起持有 `WIFI_MODE_FULL_LOW_LATENCY` 的 WifiLock、`onDestroy` 释放。`WAKE_LOCK` 与"播放期前台服务"仍未做：现有前台服务类型是 `mediaProjection`（系统内录需要），后台熄屏播放需要 `mediaPlayback` 类型 + 通知，属于独立的 Android 侧改造。
+- **D4 断链快速重连（已实现）**：`hybrid.rs::dial_with_backoff` 把每次拨号改成 0/200/600/1500 ms 的退避突发，三处拨号点（叶子连 mDNS hub、hub 重拨已知 hub、离线叶子拨记忆 hub）统一走它；一整轮失败仍只计 1 次 `dial_failures`，所以"连续 3 次失败重新选举"的节奏不变。
+- **C6 部署要求（已实现）**：`README.md`「无线部署要求」：5 GHz/有线、关闭 AP 隔离、保留组播、可选 DSCP/WMM 标记、手机省电模式的影响。
+- **仍未做**：C2 应用层 500 ms 单播心跳与 RTT/丢包测量（C1 之后收益下降，但切换决策仍需要它）、C4 Opus in-band FEC（当前只有 PLC，`codec.rs` 未设 `OPUS_SET_INBAND_FEC`/`PACKET_LOSS_PERC`）、C5 按到达间隔 P99 自适应水位（现在只有欠载 ±50 ms 闭环，上限 400 ms）、B5 取消主备状态机的并行双收、D1 BLE L2CAP CoC 验证、D2 hub 链路上限与链式接入（ttl/hop 中继是真实现的，但叶子被刻意禁止中继）、D3 hub 下行单路共享混音（现在是每链路一路 N−1 混音）、D5 帧聚合、D6 UI 频段检测。
+
 ### 图标字体（release 构建）
 
 - release 构建默认做 **图标树摇**；通过字段/记录间接传递的 `IconData` 可能被漏掉，导致按钮、面板标题、提示图标显示为空白。构建产物里的 `data/flutter_assets/fonts/MaterialIcons-Regular.otf` 若只有几 KB（完整字体约 1.6 MB）即可确认。

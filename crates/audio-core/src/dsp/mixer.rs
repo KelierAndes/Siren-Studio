@@ -25,6 +25,9 @@ pub struct StreamChannel {
     pub metrics: Arc<StreamMetrics>,
     rx: Consumer<f32>,
     resampler: DriftResampler,
+    /// Whether the last render was past the start water level; the false→true
+    /// edge is the moment this stream becomes audible again.
+    started_last: bool,
 }
 
 impl StreamChannel {
@@ -33,6 +36,7 @@ impl StreamChannel {
             metrics,
             rx,
             resampler: DriftResampler::new(target_ms),
+            started_last: false,
         }
     }
 
@@ -43,6 +47,7 @@ impl StreamChannel {
     fn flush(&mut self) {
         while self.rx.pop().is_ok() {}
         self.resampler.reset();
+        self.started_last = false;
         self.metrics.buffer_frames.store(0, Ordering::Relaxed);
     }
 
@@ -77,6 +82,10 @@ impl StreamChannel {
         if report.buffer_reset {
             self.metrics.buffer_resets.fetch_add(1, Ordering::Relaxed);
         }
+        if report.started && !self.started_last {
+            self.metrics.starts.fetch_add(1, Ordering::Relaxed);
+        }
+        self.started_last = report.started;
     }
 }
 

@@ -482,7 +482,20 @@ struct SendPeer {
     addr: SocketAddr,
     bit: Option<u8>,
     bt: Option<String>,
+    /// Configured with `--peer`, so it is never expected to show up in mDNS.
+    pinned: bool,
+    /// Last time this node was seen in a scan (or pinned). Unicast keeps
+    /// flowing long after a scan misses it: a lost multicast answer must not
+    /// split a mesh that is still reachable by IP.
+    last_seen: Instant,
 }
+
+/// How long a node may stay absent from mDNS scans before we stop sending to
+/// its last known address.
+const PEER_KEEPALIVE_TOLERANCE: Duration = Duration::from_secs(60);
+/// A peer younger than this is fresh enough to show in the UI peer list; older
+/// entries keep being sent to but are no longer advertised as online.
+const PEER_UI_FRESHNESS: Duration = Duration::from_secs(6);
 
 /// Peer set shared between the discovery and sender threads.
 type PeerMap = Arc<Mutex<HashMap<String, SendPeer>>>;
@@ -513,6 +526,8 @@ fn run_mesh_sender(
                         addr,
                         bit: None,
                         bt: None,
+                        pinned: true,
+                        last_seen: Instant::now(),
                     },
                 );
             }
@@ -687,6 +702,9 @@ fn run_mesh_sender(
 
         let peer_snapshot: Vec<MeshPeer> = current
             .iter()
+            .filter(|(_, peer)| {
+                peer.pinned || peer.last_seen.elapsed() < PEER_UI_FRESHNESS
+            })
             .map(|(_, peer)| MeshPeer {
                 name: peer.name.clone(),
                 id: peer.id.clone(),
@@ -860,7 +878,6 @@ fn run_discovery_loop(
     stop: Arc<AtomicBool>,
     _interval_secs: u64,
 ) {
-    let mut misses: HashMap<String, u32> = HashMap::new();
     let own_port = bind.rsplit(':').next().unwrap_or("").to_string();
     while !stop.load(Ordering::Relaxed) {
         match discovery::discover(Duration::from_secs(2)) {
@@ -882,7 +899,6 @@ fn run_discovery_loop(
                     // name:port) so only one stream per node is sent and mixed.
                     let key = peer_key(peer);
                     let endpoint = format!("{}:{}", peer.addr, peer.port);
-                    misses.remove(&key);
                     if !map.contains_key(&key) {
                         log::info!(
                             "mesh: discovered {endpoint} ({}) bit {:?} bt {:?}",
@@ -900,6 +916,8 @@ fn run_discovery_loop(
                                 addr,
                                 bit: peer.bit,
                                 bt: peer.bt.clone(),
+                                pinned: false,
+                                last_seen: Instant::now(),
                             },
                         );
                     }
@@ -915,24 +933,19 @@ fn run_discovery_loop(
                 }
                 seen_topology.sort_by(|a, b| a.id.cmp(&b.id));
                 *topology.lock().unwrap() = seen_topology;
-                // Drop peers that vanished from two consecutive scans.
-                let mut gone = Vec::new();
-                for key in map.keys() {
-                    let seen = found.iter().any(|p| peer_key(p) == *key);
-                    if seen {
-                        misses.remove(key);
-                    } else {
-                        let miss = misses.entry(key.clone()).or_insert(0);
-                        *miss += 1;
-                        if *miss >= 2 {
-                            gone.push(key.clone());
-                        }
-                    }
-                }
+                // Keep sending to a node long after its last mDNS answer: a
+                // dropped multicast (AP isolation, IGMP snooping, a phone in
+                // power save) is not the peer leaving, and unicast still works.
+                let gone: Vec<String> = map
+                    .iter()
+                    .filter(|(_, peer)| {
+                        !peer.pinned && peer.last_seen.elapsed() > PEER_KEEPALIVE_TOLERANCE
+                    })
+                    .map(|(key, _)| key.clone())
+                    .collect();
                 for key in gone {
                     log::info!("mesh: peer {key} left");
                     map.remove(&key);
-                    misses.remove(&key);
                 }
             }
             Err(error) => {

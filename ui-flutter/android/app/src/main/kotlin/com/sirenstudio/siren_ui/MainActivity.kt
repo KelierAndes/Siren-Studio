@@ -28,6 +28,7 @@ import kotlin.concurrent.thread
 
 class MainActivity : FlutterActivity() {
     private var multicastLock: WifiManager.MulticastLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     // ---- Bluetooth RFCOMM bridge (left side of the dual-stack) ----------
     private val btLock = Any()
@@ -355,7 +356,7 @@ class MainActivity : FlutterActivity() {
         super.onActivityResult(requestCode, resultCode, data)
     }
 
-    // ---- mDNS multicast lock ------------------------------------------
+    // ---- Wi-Fi locks ---------------------------------------------------
 
     override fun onStart() {
         super.onStart()
@@ -363,9 +364,28 @@ class MainActivity : FlutterActivity() {
         // default on Wi-Fi. Hold a multicast lock for the process lifetime.
         if (multicastLock == null) {
             val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-            multicastLock = wifi.createMulticastLock("siren_mdns").apply {
-                setReferenceCounted(false)
-                acquire()
+            multicastLock = try {
+                wifi.createMulticastLock("siren_mdns").apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            } catch (error: SecurityException) {
+                Log.w("siren", "multicast lock refused: $error")
+                null
+            }
+            // A mesh node pushes 5 ms frames: in power-save mode the NIC sleeps
+            // between beacons and every second packet arrives late, which the
+            // receiver reads as jitter and turns into underruns. The
+            // low-latency lock keeps the interface awake while the app lives.
+            wifiLock = try {
+                wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "siren_mesh").apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            } catch (error: SecurityException) {
+                // A ROM that refuses the lock must not take the whole node down.
+                Log.w("siren", "wifi lock refused: $error")
+                null
             }
         }
     }
@@ -376,6 +396,10 @@ class MainActivity : FlutterActivity() {
             btGeneration++
             closeBtBridgeLocked()
         }
+        wifiLock?.let {
+            if (it.isHeld) it.release()
+        }
+        wifiLock = null
         multicastLock?.let {
             if (it.isHeld) it.release()
         }
