@@ -4,67 +4,94 @@
 
 ## 1. 目标与边界
 
-SirenStudio 是一个星型音频汇聚系统：
+SirenStudio 是一套**去中心化无线音频组网**：同网段的每台设备既采集自己的声音，也接收别人的声音，混音后本地播放。
 
-- **发送端**：抓取系统内录 / 麦克风 / 测试音，按 5 ms（可配）切片，编码后通过 UDP 发往中心。
-- **中心**：识别多路来源，为每一路维护独立抖动缓冲与时钟漂移校正，线性混音、软限幅，输出到声卡或 WAV。
-- **控制层**：当前是 CLI；数据模型（`EngineCommand` / `EngineEvent`）已经按 FFI 与 WebSocket 的需求抽象，后续 Flutter 与 Linux WebUI 复用同一套核心。
+- **组网**：mDNS 自动发现；uid 最小的节点担任蓝牙 hub，音频本身走全互联 Wi-Fi。
+- **双栈**：同一帧同时经 Wi-Fi UDP 与蓝牙 RFCOMM 发送，接收端按序号去重；Wi-Fi 健康时蓝牙只是备份。
+- **传输**：48 kHz / 立体声 / f32；Wi-Fi 默认 raw（透明），蓝牙用 Opus 24 kbps + v3 紧凑头。
+- **接收**：每路独立抖动缓冲与漂移校正、线性混音、软限幅；hub 额外给蓝牙叶子转发 N−1 混音。
+- **界面**：Windows 桌面、Android、Linux 无头 WebUI 共用同一个核心，面板结构一致（见「拟物面板 UI」）。
 
-当前只实现 Windows 采集。其余模块（协议、DSP、网络、发现、播放、录音）是平台无关的。
+平台相关代码只有三处：采集、输出、蓝牙桥（Windows WASAPI 进程回环 + Winsock `AF_BTH`；Linux PulseAudio + `AF_BLUETOOTH`；Android JNI + `AudioPlaybackCapture` + Kotlin RFCOMM）。协议、DSP、网络、发现完全共享。
 
 ## 2. 工程结构
 
 ```
 Cargo.toml                     # workspace
 crates/
-  audio-core/                  # 可复用核心库
+  audio-core/                  # 核心库（引擎 + 协议 + DSP + 传输）
     src/
-      format.rs                # 48k / stereo / f32 常量与转换
-      protocol.rs              # UDP 帧头与校验
-      types.rs                 # EngineCommand / EngineEvent（FFI / WebUI 数据模型）
+      format.rs                # 48k / stereo / f32 常量与换算
+      protocol.rs              # 帧头 v1/v2/v3（紧凑）/v4（混音掩码）与校验
+      types.rs                 # 数据模型
       metrics.rs               # 每路与主总线指标（原子变量 + 快照）
+      engine.rs                # CenterEngine：收流 + 混音 + 本地播放
+      mesh.rs                  # MeshEngine：多节点收发、发现、选举、N−1 混音
+      hybrid.rs                # HybridNode：Wi-Fi 与蓝牙共存、角色与拨号
+      bt.rs                    # 蓝牙隧道中继（多链路、去重、到达间隔统计）
+      rfcomm.rs                # RFCOMM 链路抽象（Linux / Windows / Android 桥）
       platform.rs              # 定时器精度、线程优先级
+      analyze.rs               # 离线 WAV 频谱/静音分析
       dsp/
-        resampler.rs           # 抖动缓冲、PI 漂移校正、Hermite 插值
+        resampler.rs           # 抖动缓冲、PI 漂移校正、溢出修剪
         mixer.rs               # 多轨混音、软限幅、无锁命令队列
+        spectrum.rs            # 每流 FFT → 32 个对数频带（UI 的 EQ 屏）
+        echo.rs                # 自身回声消除（NLMS）
       net/
-        codec.rs               # Raw f32 / Opus 编解码封装
-        udp.rs                 # UDP 发送、接收、分流、PLC、超时回收
+        codec.rs               # Raw f32 / Opus 编解码
+        udp.rs                 # 收发的载体仲裁、PLC、超时回收
         discovery.rs           # mDNS/DNS-SD
       capture/
         tone.rs                # 正弦测试源
-        wasapi_capture.rs      # WASAPI loopback / 麦克风
+        process_loopback.rs    # Windows 进程回环排除（L1，默认路径）
+        wasapi_capture.rs      # WASAPI loopback / 麦克风（回退路径）
+        pulse_capture.rs       # Linux（PulseAudio / PipeWire）
+        android_capture.rs     # Android（Oboe 麦克风 + JNI 推流）
       output/
-        cpal_out.rs            # 播放（采样率/声道适配）
+        adapter.rs             # 设备格式适配的公共入口
+        cpal_out.rs            # Windows 播放
+        pulse_out.rs           # Linux 播放
         wav.rs                 # 实时 WAV 录音
-      analyze.rs               # 离线 WAV 频谱/静音分析
   siren-cli/                   # siren 可执行文件
-scripts/
-  build.ps1                    # 定位 cmake + cargo build/test
-  verify_e2e.py                # 端到端验证
+    src/
+      main.rs                  # 子命令：center/send/mesh/web/bt/rfcomm/bt-scan/devices/discover/analyze
+      mesh.rs / webui.rs       # 守护节点与内置 WebUI（页面 include_str! 进二进制）
+      isolate.rs               # 可选 PipeWire 节点隔离
+ui-flutter/                    # 桌面与 Android 界面（Rust FFI + Flutter）
+scripts/                       # build*.ps1 / verify_e2e.py / linux/
 ```
 
 ## 3. 传输格式与帧协议
 
 固定格式：**48 000 Hz / 2 声道 / f32**。发送端负责在采集边界转换到该格式；中心输出时再适配设备。
 
-帧头 20 字节（小端）：
+帧头按版本区分（小端）：
+
+| 版本 | 长度 | 用途 |
+| :-- | :-- | :-- |
+| v1 | 20 B | 早期帧，无 `origin`；仍可接收 |
+| v2 | 28 B | Wi-Fi 默认 |
+| v3 | 20 B | 蓝牙紧凑头：去掉时间戳、保留 `origin`；5 ms 帧每流省约 13 kbps 空口 |
+| v4 | 28 B | v3 + 64 位 `origin` 掩码，hub 的 N−1 混音 |
+
+v2 字段：
 
 | 偏移 | 长度 | 字段 | 说明 |
 | :-- | :-- | :-- | :-- |
 | 0 | 2 | magic | `"SR"` |
-| 2 | 1 | version | 当前 `1` |
+| 2 | 1 | version | 2 |
 | 3 | 1 | codec | `0` = raw f32，`1` = Opus |
-| 4 | 2 | frame_ms | 帧长（毫秒），1..60 |
-| 6 | 2 | stream_id | 发送端随机会话 ID |
-| 8 | 4 | seq | 序号，u32 回绕 |
+| 4 | 2 | flags | 帧长（毫秒），1..60 |
+| 6 | 2 | stream_id | 发送端会话内的流编号 |
+| 8 | 4 | seq | 序号，u32 回绕；两个载体共用同一个值 |
 | 12 | 8 | timestamp_us | 发送端 Unix 微秒时间戳 |
-| 20 | … | payload | 一个音频帧 |
+| 20 | 8 | origin | 节点 uid（持久化，见「蓝牙链式多跳」） |
+| 28 | … | payload | 一个音频帧 |
 
-- **Raw**：`frame_ms × 48 × 2 × 4` 字节。5 ms → 1920 B，加头 1940 B，200 pps ≈ 3.1 Mbps。
-- **Opus**：每包一帧，CELT low-delay，目标 192 kbps；5 ms 帧约 113 B/包（实测 226 kbps 含 UDP/IP 头）。
-- 一个 UDP 包只放一帧，接收端按 `(源地址, stream_id)` 分流。
-- `frame_ms` 决定接收端丢包时应补多少帧（PLC / 补零）。
+- **Raw**：`frame_ms × 48 × 2 × 4` 字节。5 ms → 1920 B，加头 1948 B，200 pps ≈ 3.1 Mbps。
+- **Opus**：每包一帧，CELT low-delay；Wi-Fi 默认 192 kbps（`SIREN_OPUS_BITRATE` 可覆盖），蓝牙载体固定 24 kbps。
+- 一个 UDP 包只放一帧。
+- `flags` 决定接收端丢包时补多少帧（PLC / 补零）。
 
 协议测试在 `crates/audio-core/src/protocol.rs`，覆盖回环、坏 magic、短包、未知 codec。
 
@@ -91,7 +118,7 @@ CLI/UI 线程 ── MixerHandle 命令队列（rtrb） ──▶ 混音线程
 每路状态：
 
 - 本地输入窗口（最多 8192 帧），从环缓冲按需拉取；
-- 目标水位 `target_ms`（默认 30 ms，按输出块计算）；
+- 目标水位 `target_ms`（CLI 默认 30 ms，桌面/手机界面默认 100 ms；蓝牙流由接收端自适应抬到 250–400 ms）；
 - 平滑水位 `fill_ema`（一阶低通，时间常数 0.3 s）；
 - 分数读取位置 `pos`，每次输出前进 `ratio` 帧；
 - 4 点 Catmull-Rom/Hermite 插值，避免线性插值的毛刺；
@@ -112,14 +139,14 @@ ratio     = clamp(1 + 0.02·error + integral, 1 ± 0.002)
 | `ki` | 0.005 | 积分项，跟住真实晶振/节拍差 |
 | `INTEGRAL_LEAK_PER_S` | 0.2 | 防止启动时的积分风量持续几十秒 |
 | `max_correction` | ±0.002（0.2 %，约 3.4 音分） | 音高变化上限 |
-| `MAX_FILL_RATIO` | 2× 目标 + 10 ms | 超过则丢弃最旧数据，防止卡顿后延迟长期偏高 |
+| `MAX_FILL_RATIO` | 2× 目标 + 10 ms（`fill_ceiling_frames`） | 超过则丢弃最旧数据；三端面板显示的「缓冲上限」与热路径同源，并按 1 s 环容量截断 |
 | 启动水位 | 100 % 目标 | 避免启动后长时间“慢速灌水”造成音高漂移 |
 
 关键行为：
 
 - **启动**：水位达到目标才开始出音；之前输出静音。
 - **欠载**：可用帧不足时输出静音，`started=false`，下次重新预缓冲；计入 `underruns` / `underrun_frames`。
-- **大缓冲回落**：`buffer_reset=true`，计入 `buffer_resets`；会带来一个约 5 ms 的空隙，这是为了避免数分钟的额外延迟。
+- **大缓冲回落**：`buffer_reset=true`，计入 `buffer_resets`；会丢掉一段最旧的音频（目标 + 10 ms 量级）并重新预缓冲，这是为了避免数分钟的额外延迟。
 - **目标水位语义**：统计里的 `buffer_ms` 是每个输出块开始前的可用水位，和 `--target-ms` 可直接比较。
 
 单元测试（`resampler.rs`）模拟 48 001 / 47 999 Hz 发送端连续 120 s，断言缓冲落在目标附近、ratio 收敛、无欠载；另测 200 ms 洪水触发回落与恢复。
@@ -143,48 +170,55 @@ final[i] = tanh(out[i] · master_gain)
 实现：`net/udp.rs`。
 
 - 新流：创建 1 s 环缓冲、`StreamMetrics`、`StreamChannel`，通过 `MixerHandle::add` 交给音频线程。
+- 流身份：`PeerKey = (origin, 来源地址, stream_id)`；`seq` 台账按这个 key 各自维护，所以两个载波会各自成流，靠下一条的**载体仲裁**保证同一帧不会被播两遍。
 - 序号：`wrapping_sub` 得到有符号差值。
-  - 重复/倒退 < 1000 包：丢弃（乱序迟到）。
-  - 倒退 ≥ 1000：视为发送端重启，重置解码器。
-  - 间隔 > 1：按 `frame_ms` 计算丢帧。
+  - 重复/倒退（`LATE_DUPLICATE_LIMIT = -250 000` 帧以内，约 5 s）：丢弃，不碰解码器。
+  - 倒退超出该窗口（或序号真正回绕）：视为发送端重启，重置解码器。
+  - 间隔 > 1：按帧长计算丢帧。
     - Raw：补零，单次上限 100 ms。
-    - Opus：最多 6 帧 PLC（`opus_decode_float(NULL, 0, …)`），其后重置解码器并补零。
-- 3 秒无包：从混音器与指标表移除，计入超时。
-- 每路指标：包数、丢帧、PLC 帧、溢出包、最后收包时间、水位、ratio、欠载、回落次数。
+    - Opus：最多 6 帧 PLC，其后重置解码器并补零。
+- **载体仲裁**：Wi-Fi 在最近 300 ms 内有包时，蓝牙副本整包忽略（本端 `local` 包除外），Wi-Fi 真停了才由蓝牙接管——否则备份副本会先占住序号，把 raw 音频逐包拼成 Opus。
+- 超时：Wi-Fi 流 3 s、蓝牙流 8 s 无包即移除，计入超时。
+- 每路指标：包数、丢帧、PLC 帧、溢出包、最后收包时间、水位、上限、ratio、欠载、修剪次数、出声次数（`starts`）。
 
-Opus 封装在 `net/codec.rs`，通过 `opus-head-sys`（vendored libopus）调用，`unsafe` 只出现在封装内部。编码参数：48 kHz / stereo / `OPUS_APPLICATION_RESTRICTED_LOWDELAY` / 192 kbps / complexity 5 / music。
+Opus 封装在 `net/codec.rs`，通过 `opus-head-sys`（vendored libopus）调用，`unsafe` 只出现在封装内部。参数：48 kHz / stereo / `OPUS_APPLICATION_RESTRICTED_LOWDELAY` / 192 kbps（`SIREN_OPUS_BITRATE` 可覆盖；蓝牙载体固定 24 kbps）/ complexity 5 / music。
 
 ## 8. Windows 采集
 
-实现：`capture/wasapi_capture.rs`。
+实现：`capture/process_loopback.rs`（默认）、`capture/wasapi_capture.rs`（回退）。
 
-- **系统内录**：取默认 Render 端点，但 `initialize_client` 传入 `Direction::Capture` —— 这是 WASAPI 的 loopback 开关。不能传 `Direction::Render`，否则拿到的是渲染流，`get_audiocaptureclient` 会返回 `AUDCLNT_E_WRONG_ENDPOINT_TYPE (0x88890003)`。
-- 请求 **48 kHz / 2ch / f32**，`PollingShared { autoconvert: true }`。失败时回退到设备 mix format，软件转换 16/24/32-bit PCM 或 f32，并要求 mix 采样率必须是 48 kHz（否则给出明确错误）。
-- 轮询间隔 2 ms；`AUDCLNT_BUFFERFLAGS_SILENT` 会显式补零，保持时间线。
+- **系统内录默认走 L1 进程回环排除**：用 `new_application_loopback_client(pid, false)` 激活"排除本进程树"的虚拟端点，音频引擎在混音阶段就剔除本机播放，其他应用照常采集。该端点不支持 `get_device_period` / `get_mixformat`，固定 48 kHz / 立体声 / f32 轮询读取；Windows 10 build 20348 以下激活失败，自动回退到下面的 WASAPI loopback。
+- **回退路径**：默认 Render 端点 + `initialize_client` 传 `Direction::Capture`（WASAPI 的 loopback 开关；传 `Direction::Render` 会得到 `AUDCLNT_E_WRONG_ENDPOINT_TYPE 0x88890003`），请求 48 kHz / 2ch / f32，失败时按设备 mix format 软件转换。
+- 轮询间隔 2 ms；`AUDCLNT_BUFFERFLAGS_SILENT` 显式补零，保持时间线。
 - 采集线程把 f32 帧推入 2 s 环缓冲，发送循环按 5 ms 节拍拉取；环不够时补零。
-- 采集线程提升为 `THREAD_PRIORITY_ABOVE_NORMAL`，进程调用 `timeBeginPeriod(1)`。
-
-麦克风走默认 Capture 端点、同样的初始化与转换逻辑。
+- 采集线程提升为 `THREAD_PRIORITY_ABOVE_NORMAL`，进程调用 `timeBeginPeriod(1)`；麦克风走默认 Capture 端点。
 
 ## 9. 输出与录音
 
-- **播放**：`output/cpal_out.rs`。使用设备默认配置；若设备不是 48 kHz 或不是立体声，用线性插值把混音结果适配到设备采样率，并按设备声道数映射（单声道取 L/R 平均，多于两声道其余补零）。
-- **录音**：`output/wav.rs`。软件时钟每 5 ms 渲染一块并写 32-bit float WAV。如果操作系统卡顿导致落后，**不补渲染积压块**（补渲染会瞬间抽干抖动缓冲），而是把截止时间重置到现在。
-- 进程启动时 `timeBeginPeriod(1)`，关键线程 `ABOVE_NORMAL`，减少包/录音抖动。
+- **播放**：Windows 走 `output/cpal_out.rs`，Linux 走 `output/pulse_out.rs`；`output/adapter.rs` 统一做设备格式适配（非 48 kHz 用线性插值，单声道取 L/R 平均、多声道其余补零）。
+- **录音**：`output/wav.rs`。软件时钟每 5 ms 渲染一块并写 32-bit float WAV。操作系统卡顿导致落后时**不补渲染积压块**（补渲染会瞬间抽干抖动缓冲），而是把截止时间重置到现在。
+- Windows 进程启动时 `timeBeginPeriod(1)`，关键线程 `ABOVE_NORMAL`。
 
 ## 10. mDNS 发现
 
 实现：`net/discovery.rs`。
 
 - 服务类型：`_sirenmesh._udp.local.`
-- TXT：`role=center|sender`、`name=…`、`codec=raw,opus`、`version=…`
-- 中心启动时广播，`--to auto` 浏览服务并选择第一个 `role=center`。
-- 地址解析优先私有 IPv4，排除回环；找不到其他地址时回退到回环（同机测试）。
-- 当前 `discover` 只显示节点；发送端尚未广播自身（没有监听端口）。
+- TXT：`role=mesh`、`name`、`port`、`codec`、`id`（节点 uid）、`bit`（选举用位）、`bt`（适配器地址）、`btch`（RFCOMM 通道）。
+- 每个 mesh 节点都广播自身；发现循环按 `id` 过滤自己、按 uid 去重（多网卡会对每个接口各解析一次）。
+- 地址解析优先私有 IPv4，排除回环；找不到其他地址时回退到回环（同机多实例测试）。
+- 对端在 `PEER_KEEPALIVE_TOLERANCE = 60 s` 内缺席仍继续向记住的地址单播（C1 发现与保活解耦）；超过 `PEER_UI_FRESHNESS = 6 s` 的不进设备列表。
+- `siren discover` 只打印浏览结果，不参与组网。
 
 ## 11. CLI 与统计输出
 
-`center --stats-json <file>` 每秒写一行：
+```
+siren center | send | mesh | web | bt | rfcomm | bt-scan | devices | discover | analyze
+```
+
+日常只需要 `siren web`（无头节点 + 浏览器控制台）；`center` / `send` 保留为单中心/单发送的实验与端到端测试入口。
+
+`center` / `mesh` 的 `--stats-json <file>` 每秒写一行：
 
 ```json
 {"ts_ms":..., "elapsed_s":..., "master":{"rms_db":...,"peak_db":...,"peak_hold_db":...,...},
@@ -194,31 +228,19 @@ Opus 封装在 `net/codec.rs`，通过 `opus-head-sys`（vendored libopus）调�
 
 退出时追加一行 `"event":"summary"`，包含 `bind`、`name`、`seconds`、`master`、`streams`、`receiver`、`record`。发送端 `--json` 的 stdout 只有最终摘要，进度信息全部在 stderr。
 
-## 12. 为 Flutter / Linux WebUI 预留的接口
+## 12. 核心接口与三端接入
 
-`types.rs` 已定义纯数据模型：
+引擎层（`audio-core`）：
 
-- `EngineCommand`：`SetGain`、`SetMute`、`SetTargetBufferMs`、`SetMasterGainDb`、`RemoveStream`。
-- `EngineEvent`：`StreamAdded`、`StreamRemoved`、`Stats`、`Error`。
+- `CenterEngine`：收流 + 混音 + 本地播放；`MeshEngine` = CenterEngine + 多目标发送 + 发现/选举 + hub 的 N−1 混音；`HybridNode` 把 MeshEngine 与蓝牙 `Tunnel` 组合成双栈节点。
+- 控制面：`MixerHandle::add/remove/set_target_ms/set_master_gain_db`、`StreamMetrics::set_gain_db / muted` 原子变量、`MetricsRegistry::snapshots()`（节流由上层做）。
+- 引擎只在显式 `stop()` 时退出，并记录调用方线程（见「节点退出归因与自愈」）。
 
-核心侧控制面：
+桌面与手机共用一份 Flutter 界面，通过 `ui-flutter/rust` 的**手写 C ABI**（`#[no_mangle] extern "C" siren_*`；字符串用 `CString`，引擎实例存全局注册表按 `u64` 寻址，快照跨桥为 JSON）接入同一核心；Dart 绑定在 `lib/rust_api.dart`（Windows 加载 `rust_lib_siren_ui.dll`，Android 加载 `librust_lib_siren_ui.so`）。入网用 `siren_begin_start_mesh` + `siren_poll_start_mesh` 的 JSON 状态对轮询；音频线程不进入 Dart。
 
-- `MixerHandle::add/remove/set_target_ms/set_master_gain_db`
-- `StreamMetrics::set_gain_db` / `muted` 原子变量
-- `MixerMetrics` / `MetricsRegistry::snapshots()`（60 fps 节流由上层做）
-- `net::udp::spawn`、`capture::CapturePipe`、`output::start_playback` / `record_to_wav`
+FFI 导出（`ui-flutter/rust/src/api.rs`）：`siren_init_logging`、`siren_begin_start_mesh`、`siren_poll_start_mesh`、`siren_mesh_snapshot`、`siren_mesh_set_gain` / `siren_mesh_set_muted` / `siren_mesh_set_target_ms` / `siren_mesh_set_master_gain_db`、`siren_mesh_is_running`、`siren_mesh_stop`、`siren_mesh_release`、`siren_string_free`、`siren_version`、`siren_trace`。
 
-推荐的下一层封装（尚未实现）：
-
-```
-Engine::start(CenterConfig) -> EngineHandle
-EngineHandle::send(EngineCommand)
-EngineHandle::subscribe() -> Receiver<EngineEvent>   // 30–60 fps 节流
-EngineHandle::snapshot() -> (MasterSnapshot, Vec<StreamSnapshot>)
-```
-
-- **Windows 桌面（已实现）**：`ui-flutter/` 是 Flutter 控制台，通过 `ui-flutter/rust` 的**手写 C ABI**（`#[no_mangle] extern "C" siren_*`，字符串用 `CString`、引擎实例存全局注册表按 `u64` 寻址、快照跨桥为 JSON）接入同一核心；Dart 侧绑定在 `lib/rust_api.dart`（dart:ffi，Windows 加载 `rust_lib_siren_ui.dll`，Android 加载 `librust_lib_siren_ui.so`）。长任务（中心/发送端启动、mDNS 发现）用 `begin_*` + `poll_*` JSON 状态对，Dart 定时轮询。音频线程不进入 Dart。
-- **Android（已实现，发送端验证）**：`scripts/build_apk.ps1`（内部 `flutter build apk --release --no-tree-shake-icons`），minSdk 26（cpal/oboe 链接 `-laaudio` 需要 API 26）。已验证链路：手机 App 测试音 → WiFi UDP → Windows 中心混音播放。Android 限制：
+- **Android**：`scripts/build_apk.ps1` 内部是 `flutter build apk --release --no-tree-shake-icons`；minSdk 26（Oboe 链接 `-laaudio` 需要）。
   - **本地播放已实现**：`MainActivity` 通过 `System.loadLibrary` 触发 `JNI_OnLoad`（Rust 侧拿到 JavaVM），`onCreate` 调用 `nativeSetContext(applicationContext)` 初始化 `ndk_context`（JavaVM + 全局 Context），之后 cpal 的 Oboe 后端即可正常打开播放设备。注意 JNI 符号名对包名下划线要做 `_1` 转义（`Java_com_sirenstudio_siren_1ui_MainActivity_...`）。
   - 已验证：手机组网「本地播放」开启后，PC 的测试音经手机扬声器实时播放（混音电平正常）。
   - 设备枚举仍返回空（cpal 枚举在 Android 上不可用，播放固定走系统默认输出）。
@@ -231,7 +253,7 @@ EngineHandle::snapshot() -> (MasterSnapshot, Vec<StreamSnapshot>)
   - 两个鲁棒性修复：UDP 发送遇瞬时 `EAGAIN`（ARP 解析/网卡重连）改为连续 1 秒失败才放弃；`CapturePipe` 停止时不再 join 采集线程（Oboe 关闭可能长时间阻塞，会卡住发送线程的收尾）。
   - 经验教训（已废弃的备选路径）：AAudio 直连在 MIUI 上不可用——legacy AudioTrack 包装器在第一次数据回调后返回垃圾帧数并自停（`onMoreData() callback returned invalid result`），MMAP 又被 ROM 拒绝；OpenSL ES 的 `GetInterface(SL_IID_ENGINE)` 会无限挂起。均因缺少 Java 上下文所致，勿再尝试纯原生路径。
   - `rust_builder/cargokit` 有两处本地补丁：`gradle/plugin.gradle` 补传 `FLUTTER_ROOT`（gradle daemon 无此环境变量时 dart 静默失败）；`build_tool/lib/src/android_environment.dart` 为 cmake 类 `-sys` crate 传 `ANDROID_NDK`/`CMAKE_TOOLCHAIN_FILE`/Ninja，并用 NDK 的 API 级 `*-clang.cmd` shim 直接作 cargo linker。
-  - 手机端 UI 是独立的移动层 `lib/mobile/`（底部导航：中心/发送/发现 + 日志抽屉），`main.dart` 按 `Platform.isAndroid/isIOS` 分流，桌面 `shell.dart` 不受影响；两端共用 AppModel 与主题令牌。
+  - 手机端 UI 与桌面共用 `lib/ui_kit/`：`main.dart` 只按平台在 `PulsarDevice`（桌面整机）与 `MobileDevice`（纵向滚动）之间选择；旧的 `lib/mobile/` 与 `shell.dart` 已不被引用。`SIREN_UI_FORCE_MOBILE=1` 可在桌面预览手机布局。
 - **Linux（已实现，无界面守护 + WebUI）**：同一份 Rust 核心以两种形态运行：
   - `siren mesh`：纯 CLI 守护节点（`--source tone|loopback|mic`、`--no-play`、`--peer`、`--duration`、JSON 统计）。
   - `siren web --listen 0.0.0.0:8080 [--autostart]`：内置 HTTP 控制台，浏览器完成加入/离开、音源、缓冲目标、主增益、每路增益/静音与实时电平。页面 `crates/siren-cli/src/webui/index.html` 由 `include_str!` 打进二进制，无前端构建步骤。API：`GET /api/status`，`POST /api/start|api/stop|api/controls|api/streams/{id}`（页面 700 ms 轮询 JSON）。
@@ -248,10 +270,10 @@ EngineHandle::snapshot() -> (MasterSnapshot, Vec<StreamSnapshot>)
   - **Wi-Fi + 蓝牙双栈自动**：不存在接入方式选择。`HybridNode`（`audio-core::hybrid`）同时运行 Wi-Fi mesh 与蓝牙 overlay：
     - mDNS TXT 广播 `bit` / `bt`（本机适配器地址）/ `btch`（RFCOMM 通道 16）；蓝牙能力集合中 **uid 最小者自动成为 hub** 并监听，其余 leaf 自动拨号；本机地址不可读（Android 遮蔽）时只做 leaf。角色切换只拆除/重建蓝牙链路，Wi-Fi 音频不中断。
     - RFCOMM 内置于 `audio-core::rfcomm`（Linux 原生 `AF_BLUETOOTH` socket、Windows Winsock `AF_BTH`、Android 由 Kotlin `startBtBridge` 桥到 `127.0.0.1:47980`），原生 socket 经 `bridge_raw` 双向泵到回环 TCP，再作为 `Tunnel` 的 `Link`。
-    - 协议 v2 帧头新增 8 字节 `origin`（节点 uid）；mesh 发送端每 tick 用共享 `FramePacker` **编码一次**，同一段文同时发给 Wi-Fi peers 与蓝牙隧道；接收端按 `(origin, stream_id, seq)` 去重（`PeerKey::Origin`），迟到副本直接丢弃，仅序号真正回绕才重置解码器。
+    - 协议 v2 帧头新增 8 字节 `origin`（节点 uid）；mesh 发送端每 tick 用共享 `FramePacker` **编码一次**，同一段文同时发给 Wi-Fi peers 与蓝牙隧道；接收端以 `PeerKey = (origin, 地址, stream_id)` 建流、按 `seq` 判重，迟到副本直接丢弃，仅序号真正回绕才重置解码器；Wi-Fi 在 300 ms 内有包时蓝牙副本整包忽略（见「网络接收语义」的载体仲裁）。
     - `Tunnel` 支持运行中 `add_link`/`clear_links`（hub 随时接受新 leaf），每链路写队列有界（8 帧），RFCOMM socket `SO_SNDBUF` 4 KB——把蓝牙积压限制在百毫秒级，避免链路变慢时把几秒旧音频堆在 kernel 里。
     - 状态在 `MeshSnapshot.bt`（角色/状态/hub/链路数/收发字节），三端 UI 展示；流条目带 `path`（wifi/bt/local）。
-    - **分通道编码且共用序号**：Wi-Fi 走用户选择的编码；蓝牙载体用 `FramePacker::with_stream` 编 **Opus 32 kbps**，并调用 `build_compact_with_seq(pcm, primary_seq)` **使用主载波本 tick 的 seq**。两个载体各自计数会让蓝牙副本永久落后，接收端把它当迟到副本整段丢弃——Wi-Fi 一断就要静默“等序号追上”。实测修复前 PC 侧落后 559 帧（2.8 s）。
+    - **分通道编码且共用序号**：Wi-Fi 走用户选择的编码；蓝牙载体用 `FramePacker::with_stream` 编 **Opus 24 kbps**，并调用 `build_compact_with_seq(pcm, primary_seq)` **使用主载波本 tick 的 seq**。两个载体各自计数会让蓝牙副本永久落后，接收端把它当迟到副本整段丢弃——Wi-Fi 一断就要静默“等序号追上”。实测修复前 PC 侧落后 559 帧（2.8 s）。
     - **解码器按 codec 分槽**：流可能先由蓝牙（Opus）建立、之后收到 Wi-Fi（raw）副本；`decoders[codec]` 必须按 codec id 放置。放在索引 0 会让 raw 包用 Opus 解码器解码而全部失败（表现为 rms −120、海量 lost/resets）。解码失败也必须推进 `last_seq`，否则每个后续包都会重新补零。
     - **切载波重同步**：两个载波的到达时间可能相差数百毫秒到数秒（蓝牙中继排队）。载波切换且序号差 >100 帧时走 `MixerCommand::Flush` 清空该流积压并用新载波继续，而不是补零/丢弃等待；只有“落后的载波”在活跃载波已静默 >200 ms 时才接受，避免正常 Wi-Fi 期间被陈旧蓝牙突发反复拉回。
     - **发送失败退避**：目的地址消失（Wi-Fi 关闭、对端离线）时每 5 ms 一次的 `sendto` 失败会在手机端刷出 200 条/秒的日志；连续 20 次失败后 `UdpSender` 暂停 1 s，失败日志最多 1 条/秒。
@@ -259,7 +281,7 @@ EngineHandle::snapshot() -> (MasterSnapshot, Vec<StreamSnapshot>)
     - **占空比**：`BT_DUTY_CYCLE = 1`，蓝牙载体每 tick 都发。曾经的 1/10 占空比会在 Wi-Fi 对端存在时把回退链路“饿死”。
     - **N−1 混音转发（hub）**：hub 为每个蓝牙链路只发 **一路混音**——`(hub 本地 + 其它叶子)`、排除目的叶子自身。接收端解码后的 PCM 进 `MixTap`（每 origin 最近 10 ms），hub 发送线程每 10 ms 组一次混音、用 **v4 头（28 B，含 64 位 origin 掩码）** 编码为 24 kbps Opus，并通过本地 0xB3 定向信封只投给该叶子的链路。叶子按掩码仲裁：被混音覆盖且对应直连流缺失时才播放混音，缺失以外的直连流继续播放（hub 断网时仍直连的对端不会陪葬）；所有被覆盖流恢复后立即清空混音缓冲。
     - **按需下行**：只有目的叶子的上行已经走蓝牙（hub 侧 `last_wifi_seen > 300 ms`）时才向该链路发混音；Wi-Fi 健康时下行 **0 B/s**。Wi-Fi 断开后 300 ms 内切换为全速率混音。
-    - **链路健康**：看门狗改为双向——6 s 内 **收发都 < 4 KB** 才清空链路（N−1 混合态下行按设计为 0，只看接收会误判死链并触发重拨）。叶子多链路只 `keep_latest_link()`（旧实现 `clear_links()` 会把刚建好的链路一起拆掉，形成拨号回环）；hub 每 5 s 清理 **>10 s 无数据** 的陈旧链路，不主动关闭活动链路。
+    - **链路健康**：判定一律双向，只静默一侧不算死链。`hybrid` 看门狗在 6 s 内**收发都 < 4 KB** 才清空链路；`bt.rs` 每 5 s 扫描一次，`last_out` 记录本端最后一次真正写出，孤儿（30 s 未收帧）与陈旧（10 s 未收帧）两条规则都要求同一窗口内本端也没有发出——叶子在 Wi-Fi 健康时下行空闲属正常。叶子多链路只 `keep_latest_link()`（旧 `clear_links()` 会把刚建好的链路一起拆掉，形成拨号回环）。
     - **选举迟滞**：hub 保持直至更小 uid 连续 2 tick 出现；leaf 连接保持、hub 失踪 3 tick 才重选；拨号 3 s 节流、连续失败 3 次重新选举。
     - **离线入网**：叶子成功连接后把 hub 记入 `hub.json`（Android 经 Kotlin `stateDir()` 存 filesDir），无 Wi-Fi（无 mDNS）时按记忆轮拨最近 hub。
     - **蓝牙扫描发现（mDNS 备选）**：hub 通过 `BtTransport::set_discoverable` 周期性可被发现（Linux `bluetoothctl discoverable on`、Windows `BluetoothEnableDiscovery`；Android 无静默可发现 API，只作叶子）；叶子在无拓扑且无记忆（或记忆拨号连续失败）时执行经典蓝牙 inquiry（`BtTransport::scan`），每次最多探测 6 个候选的 RFCOMM 16：连接失败或成功后 2.5s 内没有收到任何帧就判定为非 Siren 设备并拉黑 10 分钟（多轮扫描会继续往后走，直至命中中心），命中后写入 `hub.json`。调试：`siren bt-scan --seconds 8`。Android 清单必须给 `BLUETOOTH_SCAN` 加 `android:usesPermissionFlags="neverForLocation"`，否则 12+ 上 `startDiscovery()` 返回 true 但收不到任何结果。
@@ -291,7 +313,7 @@ EngineHandle::snapshot() -> (MasterSnapshot, Vec<StreamSnapshot>)
 
 - **A 载波切换测量（已实现）**：`net/udp.rs` 的 `SwitchTrace` 记录「上一载波最后一包 → 判定切换 → 重新攒够水位出声」，并在每次接受包时检查两包之间的空档，超过 500 ms 记 `audible gap N ms before this bt|wifi packet`；切换完成记 `switch wifi -> bt measured: X ms with no packet at all, Y ms synthesized as silence, then Z ms re-filling; total mute …`。出声时刻由 `StreamMetrics.starts`（`dsp/mixer.rs` 里 `started` 的 false→true 边沿）判定。原先 `seq gap` 证据行有 120 次的进程生命周期上限，跑一会儿就不再打印，改为每流 2 s 节流。
 - **测量结果（Linux hub 收手机端流，3 轮断/复 Wi-Fi，共 6 次切换）**：**没有一次出现 ≥500 ms 的收包空档**，也没有触发 Flush/resync；合成静音累计 240 帧（10 ms）与 720 帧（30 ms）各一次，`underruns` 每轮 +2。即**双栈↔纯蓝牙的切换本身不产生可听静默**，P1 的"约 5 s"不来自 B 组（热备/预热/先出声/快速判定）。日志里 5–6 s 量级的是 RFCOMM 链路自身反复建立/超时（`bt: link N never carried audio, closed`、`reader ended`），归 D 组与 #38。
-- **B1 下行保活 / B2 备用载波预热 / B3 先出声后增缓冲 / B4 60–100 ms 快速判定：未实施**，理由是上面的测量。补充：B3 设想的"PI 数秒内把水位升到目标"在现有 ±0.2% 漂移上限下不成立——0.2% 消费差每秒只能攒 2 ms 音频，150 ms 要 75 s；要几秒升上去就得把消费速率偏 5%，等于可听的音高下沉，故不做。
+- **B1 下行保活 / B2 备用载波预热 / B4 60–100 ms 快速判定：未实施**，理由是上面的测量。B3 的「先出声再增缓冲」没有按"几秒内把水位推到目标"做——那在 ±0.2 % 漂移上限下不成立（0.2 % 消费差每秒只能攒 2 ms，150 ms 要 75 s；几秒升上去就得偏 5 %，是可听的音高下沉）。现在的做法是启动即按目标水位预缓冲（`START_FRACTION = 1.0`），载波切换用 Flush + 重新预缓冲。
 - **C1 发现与保活解耦（已实现）**：`mesh.rs` 的 `SendPeer` 增加 `last_seen`/`pinned`，mDNS 连续缺席不再 2 次（约 5.6 s）就删除对端并销毁 `UdpSender`，改为 `PEER_KEEPALIVE_TOLERANCE = 60 s` 内继续向记住的地址单播；`PEER_UI_FRESHNESS = 6 s` 之外的对端不进 UI 设备列表，所以设备数仍与原来一样及时。拓扑（角色选举用）每轮扫描重建，不受影响。
 - **C3 Android Wi-Fi 省电（部分实现）**：`MainActivity.kt` 在 `onStart` 与 MulticastLock 一起持有 `WIFI_MODE_FULL_LOW_LATENCY` 的 WifiLock、`onDestroy` 释放。`WAKE_LOCK` 与"播放期前台服务"仍未做：现有前台服务类型是 `mediaProjection`（系统内录需要），后台熄屏播放需要 `mediaPlayback` 类型 + 通知，属于独立的 Android 侧改造。
 - **D4 断链快速重连（已实现）**：`hybrid.rs::dial_with_backoff` 把每次拨号改成 0/200/600/1500 ms 的退避突发，三处拨号点（叶子连 mDNS hub、hub 重拨已知 hub、离线叶子拨记忆 hub）统一走它；一整轮失败仍只计 1 次 `dial_failures`，所以"连续 3 次失败重新选举"的节奏不变。
@@ -408,7 +430,7 @@ bt: link quality: 2 link(s), tx 0.0 KB/s, rx 11.7 KB/s, write drops 0,
   - Linux 的 monitor 是数字回环：20 ms 播放缓冲 + 2.5 ms 写块把参考与采集的时延抖动控制在滤波器窗口内。实测发送电平在播放对端音乐时 −51 ～ −71 dBFS；独立探针（`cargo run --release -p audio-core --example pulse_echo_probe`）在纯净噪声下可达 >140 dB 抵消。Windows 端点回环回退、Android 防御路径共用该模块。
 - **L2 协议层 / L3 拓扑层**：mesh 的每个节点只向所有对端广播**本机原生采集流**，从不转发“混音结果”，网络天然是 1-hop 无环拓扑，因此当前不需要 RTP CSRC 血统位掩码或 Mix-Minus 矩阵。若将来加入中继/转发模式，必须同时补 `OriginMask`（收包发现含自身位即丢弃）与按目标计算的 N−1 混音。
 
-### 蓝牙链式多跳（实验，Phase 1：路由核心）
+### 蓝牙链式多跳（隧道与平台桥）
 
 蓝牙只作为**字节链路**（RFCOMM / LE L2CAP），隧道把现有 Opus/UDP 包原样搬运，音频 DSP/混音/UDP 协议完全复用：
 
@@ -416,7 +438,7 @@ bt: link quality: 2 link(s), tx 0.0 KB/s, rx 11.7 KB/s, write drops 0,
 - 规则：`origin & self_bit != 0` 丢弃（自己的声音绕回）、TTL=0 丢弃、按 `(origin, stream_id, seq)` 去重；收到的包注入本地 mesh 并转发到除来源外的所有链路。
 - `siren bt --bit N --port 480xx (--listen-link 482xx | --link ip:port) --source tone|loopback|mic --no-play`：本机 mesh 关闭 mDNS（`discovery=false`），只把本地流发给隧道；隧道负责多跳。
 - 三节点本地链测试（A 440 Hz ↔ Hub 550 Hz ↔ C 880 Hz，Opus 10 ms）：A/C/Hub 各看到 **2 路 −15 dB** 的远端流，master ≈ −12 dB；A 的音频经 Hub 到达 C，Origin/TTL/去重正常，退出无残留。
-- **Phase 1 限制**：逐包转发而非 Mix-and-Forward，链路带宽随活跃源数量增长（3 节点约 2–3 路 Opus/链路）；后续可加 N-1 混音中继。Opus 10 ms 单/立体声 64–128 kbps 足以跑 RFCOMM。
+- **Phase 1 限制与后续**：这条 `siren bt` 路径是逐包转发（带宽随活跃源数量增长，3 节点约 2–3 路 Opus/链路）。双栈节点（`HybridNode`）已经在 hub 侧改为 **N−1 混音转发**——每条链路只发一路混音（见「Wi-Fi + 蓝牙双栈自动」）。Opus 10 ms 单/立体声 64–128 kbps 足以跑 RFCOMM。
 - **平台桥接契约**：每个蓝牙链路在本地暴露为一个 TCP 字节流。Android 由 Kotlin RFCOMM server 桥接；Linux 用 BlueZ RFCOMM；Windows 用 WinRT RFCOMM client。隧道与三端音频逻辑不变。
 - 纯蓝牙运行需要设备配对/授权（手机蓝牙目前需手动打开）；三端 RFCOMM 服务 UUID、配对与权限属于 Phase 2。
 
@@ -427,7 +449,7 @@ bt: link quality: 2 link(s), tx 0.0 KB/s, rx 11.7 KB/s, write drops 0,
 - 两端再用 `siren bt --bit 1 --port 48001 --link 127.0.0.1:47980 --source tone --target-ms 150 --opus-bitrate 64000` 接入隧道。
 - 实测：L2CAP ping 0% 丢包；RFCOMM 通道 16 **未配对即可连接**；双向音频各 −15 dB（440/880 Hz Opus）。
 - **链路基线**：绕过隧道用 Python/PowerShell 直传 512 KB，仅 **34–40 KB/s**，最大停顿 **5.1–5.9 s**；链路为 CENTRAL/AUTH/ENCRYPT、质量 255，PC 使用集成 Intel 蓝牙（MAC `E0:8F:4C:16:9F:58`，非 USB dongle）。
-- 已排除：Nagle（两端 `TCP_NODELAY`）、Opus 码率（64/192 kbps 均复现）、SNIFF（`sudo hcitool lp <pc> RSWITCH` 后停顿不变）。剩余嫌疑：RFCOMM MTU/流控、Windows 无线电电源管理、2.4 GHz 共存/重传，或需改用 BLE L2CAP CoC。下一步先做手机↔Linux 链路（不同控制器），并补 Android 桥。
+- 已排除：Nagle（两端 `TCP_NODELAY`）、Opus 码率（64/192 kbps 均复现）、SNIFF（`sudo hcitool lp <pc> RSWITCH` 后停顿不变）。剩余嫌疑：RFCOMM MTU/流控、Windows 无线电电源管理、2.4 GHz 共存/重传，或需改用 BLE L2CAP CoC。手机↔Linux 链路（不同控制器）与 Android 桥后来都已补上（见下）；PC↔Linux 这一段仍是未结项（#38）。
 - **Android 桥（已实现）**：`MainActivity` 用隐藏的 `createInsecureRfcommSocket(16)`（失败回退 SPP UUID）连接 Linux；每个连接配一个本地 TCP listener（47980），与 Rust 通过 JNI 启动的 `Tunnel + MeshEngine`（tone、Opus 64k、150 ms）对接。启动方式：
   `adb shell am start -n com.sirenstudio.siren_ui/.MainActivity --es bt_connect <linux-mac> --ei bt_bridge 47980 --ei bt_mesh 48101 --ei bt_bit 2 --ef bt_freq 880 --ez bt_output true`
   - Manifest 增加 `BLUETOOTH_CONNECT/SCAN`（运行时授权），`bt-node` 每秒把流/主电平写入 logcat。
@@ -466,16 +488,19 @@ powershell -File scripts/build_ui.ps1
 
 | 变量 | 作用 |
 | :-- | :-- |
-| `SIREN_UI_AUTOSTART=1` | 启动 800ms 后自动启动中心 |
-| `SIREN_UI_MODE=playback/record/silent/...` | 覆盖中心输出模式 |
-| `SIREN_UI_ADVERTISE=0` | 关闭 mDNS 广播 |
+| `SIREN_UI_AUTOSTART=1` | 启动后自动加入组网 |
+| `SIREN_UI_FORCE_MOBILE=1` | 在桌面预览手机布局 |
+| `SIREN_UI_MESH_NAME` / `SIREN_UI_MESH_PORT` | 节点名 / UDP 端口（默认 47900，同机多实例时改） |
+| `SIREN_UI_MESH_SOURCE=tone\|loopback\|microphone` | 覆盖采集源 |
+| `SIREN_UI_MESH_OUTPUT=0` | 本机静默（不打开播放设备） |
+| `SIREN_UI_MESH_TARGET_MS` | 启动时的缓冲目标（毫秒） |
 | `SIREN_UI_DEBUG=1` | 把关键流程事件追加写 `ui_debug.log`（进程工作目录） |
 
 日志：`siren_ui.log` 与 exe 同目录（env_logger + VEH 崩溃报告 + panic hook 都写这里）。
 
 ## 14. 测试
 
-单元测试（19 个）：
+单元测试（49 个）：
 
 ```powershell
 cargo test --workspace
@@ -502,12 +527,13 @@ python scripts/verify_e2e.py
 
 ## 15. 已知限制
 
-- 只有 Windows 采集；Linux 需要 PipeWire/PulseAudio 模块，Android 需要 `AudioPlaybackCapture` + 前台服务。
-- 没有加密与鉴权；当前默认只建议在可信局域网使用。
-- 没有按进程内录（Windows Process Loopback）、没有蓝牙 A2DP Sink。
-- 混音是等增益线性叠加；每路增益/静音已在核心里，但 CLI 还没有控制入口（下一阶段随界面提供）。
-- mDNS 的 `--to auto` 选择第一个中心；多中心场景应显式指定地址。
-- 端到端延迟取决于系统调度与目标水位；极端卡顿会触发一次缓冲回落（约 5 ms 空隙）。
+- 没有加密与鉴权；默认面向可信局域网，跨网暴露请置于反向代理/防火墙之后。
+- 没有蓝牙 A2DP Sink；蓝牙只承载 Siren 自己的 RFCOMM 隧道。
+- 多节点下 N−1 混音流的抖动缓冲仍会偶发「修剪↔欠载」（MIX1）；弱链路上叶子侧实测约 10 % 丢包（手机 raw 双流共享上行带宽）。
+- Wi-Fi 关→开后发送 socket 仍可能绑在旧接口地址上，音频暂时留在蓝牙（#68）；重启应用即恢复。
+- PC↔NAS 的 RFCOMM 链路建立仍不稳定（#38），失败时该方向退回 Wi-Fi 直连，不影响出声。
+- 端到端延迟取决于系统调度与目标水位；长时间卡顿会触发一次缓冲修剪，把延迟拉回目标（丢掉的是最旧的一段，量值不是固定 5 ms）。
+- Linux 发布包目前只有 amd64。
 
 ## 16. 调参速查
 
@@ -524,9 +550,9 @@ python scripts/verify_e2e.py
 
 `crates/audio-core/src/mesh.rs` 的 `MeshEngine` = `CenterEngine`（收流 + 混音 + 本地播放）+ 多目标发送线程 + mDNS 发现循环。每个节点同时收发，无需显式指定中心/发送端：
 
-- 广播 `role=mesh` 服务，TXT 携带随机 `node_id`；发现循环以此过滤自身，并按节点 id 去重（多网卡设备会对每个接口各 resolve 一次，不去重会导致同一节点收到重复流并叠加混音）。
-- 节点离开：连续两次扫描未出现即移除。
+- 广播 `role=mesh` 服务，TXT 携带持久化的 `id`（节点 uid）与蓝牙字段；发现循环以此过滤自身，并按 uid 去重（多网卡设备会对每个接口各 resolve 一次，不去重会导致同一节点收到重复流并叠加混音）。
+- 节点离开：对端连续缺席不再立刻删除——`PEER_KEEPALIVE_TOLERANCE = 60 s` 内继续单播，`PEER_UI_FRESHNESS = 6 s` 之外不显示（C1）。
 - `MeshConfig.static_peers` 可钉住端点（mDNS 不可用时兜底）；单测 `mesh_nodes_exchange_audio_without_manual_discovery` 覆盖收发链路。
 - FFI：`siren_begin_start_mesh / poll_start_mesh / mesh_snapshot / mesh_set_gain / mesh_set_muted / mesh_set_target_ms / mesh_set_master_gain_db / mesh_stop / mesh_release`；UI 增益/静音按当前激活的混音引擎（mesh 优先）路由。
 - Android：`MainActivity` 持有 `WifiManager.MulticastLock`（Manifest 需要 `CHANGE_WIFI_MULTICAST_STATE`，否则 SecurityException 崩溃）；Oboe 输出走 `ndk_context`，采集使用 MediaProjection + `AudioPlaybackCapture`（排除自身 UID，见防回环一节）或麦克风。
-- UI 只有组网一个页面（桌面侧栏 / 移动端单页），不再有中心端与发送端的配置入口；独立的中心/发送引擎仅保留在 CLI（`siren center` / `siren send`）与测试中。端口可用 `SIREN_UI_MESH_PORT` 覆盖（默认 47900，用于同机多实例测试）；`SIREN_UI_AUTOSTART=1` 会在启动后自动加入组网，来源/输出可用 `SIREN_UI_MESH_SOURCE`（tone/loopback/microphone）与 `SIREN_UI_MESH_OUTPUT`（0=静默）覆盖。
+- UI 只有组网一个面板：桌面按页翻动设备卡，手机纵向滚动；不再有中心端与发送端的配置入口。独立的中心/发送引擎仅保留在 CLI（`siren center` / `siren send`）与测试中。端口可用 `SIREN_UI_MESH_PORT` 覆盖（默认 47900，用于同机多实例测试）；`SIREN_UI_AUTOSTART=1` 会在启动后自动加入组网，来源/输出可用 `SIREN_UI_MESH_SOURCE`（tone/loopback/microphone）与 `SIREN_UI_MESH_OUTPUT`（0=静默）覆盖。
