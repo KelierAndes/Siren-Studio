@@ -188,6 +188,76 @@ struct TunnelStats {
     dropped: AtomicU64,
     last_rx_us: AtomicU64,
     links: AtomicUsize,
+    /// Last completed arrival-gap window, published by the relay thread.
+    gap: Mutex<GapWindow>,
+}
+
+/// Rolling arrival-gap window for the Bluetooth links.
+///
+/// Counters alone cannot tell the three RF suspects apart: sniff parking shows
+/// a bimodal gap (mostly one frame interval, occasionally a wake-up delay),
+/// 2.4 GHz coexistence shows a long retransmission tail, and piconet sharing
+/// starves every link in the same window. The gap *shape* does.
+#[derive(Clone, Debug, Default)]
+pub struct GapWindow {
+    /// Packets per bucket, upper edge in ms: 10, 25, 50, 100, 250, 500, 1000,
+    /// 2000, and everything above.
+    buckets: [u32; 9],
+    samples: u32,
+    bytes: u64,
+    worst_ms: u32,
+    started_us: u64,
+    elapsed_ms: u64,
+}
+
+const GAP_EDGES_MS: [u32; 8] = [10, 25, 50, 100, 250, 500, 1000, 2000];
+
+impl GapWindow {
+    fn record(&mut self, gap: Duration, bytes: usize, now_us: u64) {
+        if self.started_us == 0 {
+            self.started_us = now_us;
+        }
+        let ms = gap.as_millis() as u32;
+        let index = GAP_EDGES_MS
+            .iter()
+            .position(|edge| ms <= *edge)
+            .unwrap_or(GAP_EDGES_MS.len());
+        self.buckets[index] += 1;
+        self.samples = self.samples.saturating_add(1);
+        self.bytes += bytes as u64;
+        self.worst_ms = self.worst_ms.max(ms);
+        self.elapsed_ms = now_us.saturating_sub(self.started_us) / 1000;
+    }
+
+    /// Upper edge of the bucket holding the given percentile, in ms.
+    fn percentile(&self, fraction: f64) -> u32 {
+        if self.samples == 0 {
+            return 0;
+        }
+        let want = ((self.samples as f64) * fraction).ceil() as u32;
+        let mut seen = 0u32;
+        for (index, count) in self.buckets.iter().enumerate() {
+            seen += count;
+            if seen >= want {
+                return GAP_EDGES_MS
+                    .get(index)
+                    .copied()
+                    .unwrap_or(u32::MAX);
+            }
+        }
+        u32::MAX
+    }
+
+    fn stalls_500ms(&self) -> u32 {
+        self.buckets[6..].iter().sum()
+    }
+
+    fn kb_per_s(&self) -> f64 {
+        if self.elapsed_ms < 1000 {
+            return 0.0;
+        }
+        (self.bytes as f64 / 1024.0) / (self.elapsed_ms as f64 / 1000.0)
+    }
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize)]
@@ -199,6 +269,15 @@ pub struct TunnelStatsSnapshot {
     pub rx_packets: u64,
     pub dropped: u64,
     pub last_rx_ms: u64,
+    /// Arrival-gap shape of the last completed window.
+    pub gap_samples: u32,
+    pub gap_p50_ms: u32,
+    pub gap_p90_ms: u32,
+    pub gap_p99_ms: u32,
+    pub gap_max_ms: u32,
+    pub gap_stalls_500ms: u32,
+    pub gap_kb_per_s: f64,
+    pub gap_window_ms: u64,
 }
 
 pub struct Tunnel {
@@ -243,6 +322,7 @@ impl Tunnel {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
+        let gap = self.stats.gap.lock().map(|gap| gap.clone()).unwrap_or_default();
         TunnelStatsSnapshot {
             links: self.stats.links.load(Ordering::Relaxed),
             tx_bytes: self.stats.tx_bytes.load(Ordering::Relaxed),
@@ -251,6 +331,14 @@ impl Tunnel {
             rx_packets: self.stats.rx_packets.load(Ordering::Relaxed),
             dropped: self.stats.dropped.load(Ordering::Relaxed),
             last_rx_ms: if last == 0 { 0 } else { now.saturating_sub(last) },
+            gap_samples: gap.samples,
+            gap_p50_ms: gap.percentile(0.5),
+            gap_p90_ms: gap.percentile(0.9),
+            gap_p99_ms: gap.percentile(0.99),
+            gap_max_ms: gap.worst_ms,
+            gap_stalls_500ms: gap.stalls_500ms(),
+            gap_kb_per_s: gap.kb_per_s(),
+            gap_window_ms: gap.elapsed_ms,
         }
     }
 
@@ -383,6 +471,9 @@ impl Tunnel {
                     let mut attached_at: HashMap<usize, Instant> = HashMap::new();
                     let mut window: u64 = 0;
                     let mut last_sweep = Instant::now();
+                    // Arrival-gap gauge, published every sweep (5 s).
+                    let mut gauge = GapWindow::default();
+                    let mut arrivals: HashMap<usize, Instant> = HashMap::new();
                     while !relay_stop.load(Ordering::Relaxed) {
                         match command_rx.try_recv() {
                             Ok(Command::AddLink { id, writer }) => {
@@ -460,6 +551,7 @@ impl Tunnel {
                                 }
                             }
                             Event::LinkClosed(id) => {
+                                arrivals.remove(&id);
                                 writers.remove(&id);
                                 link_origins.remove(&id);
                                 if let Some(link) = relay_links.lock().unwrap().remove(&id) {
@@ -468,6 +560,14 @@ impl Tunnel {
                                 relay_stats.links.store(writers.len(), Ordering::Relaxed);
                             }
                             Event::Link(source, mut envelope) => {
+                                let arrived = Instant::now();
+                                if let Some(previous) = arrivals.insert(source, arrived) {
+                                    gauge.record(
+                                        arrived.duration_since(previous),
+                                        envelope.payload.len(),
+                                        now_us(),
+                                    );
+                                }
                                 let own = self_uid.load(Ordering::Relaxed);
                                 let payload_origin =
                                     crate::protocol::frame_identity(&envelope.payload)
@@ -569,6 +669,14 @@ impl Tunnel {
                         // silent for a while.
                         if last_sweep.elapsed() >= Duration::from_secs(5) {
                             last_sweep = Instant::now();
+                            // Publish the completed window. Zero samples is a
+                            // legitimate state — a leaf's Bluetooth downlink is
+                            // idle by design while its Wi-Fi is healthy — so it
+                            // is reported as-is instead of being faked into a
+                            // 5 s stall, which made a healthy network look broken.
+                            if let Ok(mut published) = relay_stats.gap.lock() {
+                                *published = std::mem::take(&mut gauge);
+                            }
                             let stale: Vec<usize> = link_origins
                                 .iter()
                                 .filter(|(_, (_, at))| {
@@ -939,6 +1047,27 @@ impl Seen {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gap_window_keeps_the_shape_of_the_stream() {
+        let mut window = GapWindow::default();
+        for index in 0..900u64 {
+            window.record(
+                Duration::from_millis(5),
+                100,
+                1_000_000 + index * 5_000,
+            );
+        }
+        // One 3 s stall must show up in the tail, not average away into the
+        // byte counters — that is the whole point of the gauge.
+        window.record(Duration::from_millis(3000), 100, 6_000_000);
+        assert_eq!(window.percentile(0.5), 10);
+        assert_eq!(window.percentile(0.99), 10);
+        assert_eq!(window.worst_ms, 3000);
+        assert_eq!(window.stalls_500ms(), 1);
+        assert_eq!(window.samples, 901);
+        assert!(window.kb_per_s() > 0.0);
+    }
 
     #[test]
     fn targeted_local_envelope_is_parsed() {

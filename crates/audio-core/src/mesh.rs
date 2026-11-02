@@ -144,6 +144,14 @@ pub struct BtStatus {
     pub tx_bytes: u64,
     pub rx_bytes: u64,
     pub dropped: u64,
+    /// Arrival-gap shape of the Bluetooth links over the last window: the
+    /// difference between sniff parking, 2.4 GHz coexistence and piconet
+    /// sharing lives here, not in the byte counters.
+    pub gap_samples: u32,
+    pub gap_p99_ms: u32,
+    pub gap_max_ms: u32,
+    pub gap_stalls_500ms: u32,
+    pub rx_kb_per_s: f64,
     pub last_error: Option<String>,
 }
 
@@ -162,6 +170,11 @@ impl Default for BtStatus {
             tx_bytes: 0,
             rx_bytes: 0,
             dropped: 0,
+            gap_samples: 0,
+            gap_p99_ms: 0,
+            gap_max_ms: 0,
+            gap_stalls_500ms: 0,
+            rx_kb_per_s: 0.0,
             last_error: None,
         }
     }

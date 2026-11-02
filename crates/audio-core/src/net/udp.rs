@@ -30,8 +30,11 @@ const BT_PEER_TIMEOUT: Duration = Duration::from_secs(8);
 /// RFCOMM has bursts and long stalls; a Bluetooth-only stream gets a wider
 /// jitter buffer than the LAN default.
 const BT_STREAM_TARGET_MS: f32 = 250.0;
-/// Upper bound for the adaptive Bluetooth buffer (adds latency, but a
-/// drop-out-free link beats a tight one on RFCOMM).
+/// Upper bound for the adaptive Bluetooth buffer. Measured: the link itself is
+/// clean (p99 100 ms, no stall over 500 ms) and a 250 ms target cut latency but
+/// doubled the underruns, because every overflow trim starves the player right
+/// after. The loop only raises this for starvation that is *not* trim-correlated
+/// (see the guard in the receiver), so the deep setting is reserved for real RF.
 const BT_MAX_TARGET_MS: f32 = 400.0;
 /// 10 ms of stereo audio at 48 kHz, the window a hub keeps per origin for
 /// building N-1 mixes.
@@ -551,6 +554,9 @@ struct Peer {
     last_mute_log: Instant,
     analyzer: SpectrumAnalyzer,
     last_underruns: u32,
+    /// Overflow trims seen at the last adaptive check; underruns that follow a
+    /// trim are our own doing and must not deepen the buffer.
+    last_resets: u32,
     last_target_check: Instant,
     last_target_decay: Instant,
     last_report: Instant,
@@ -1009,6 +1015,8 @@ fn run(
                                     peer.bt_target_ms = target;
                                     peer.last_underruns =
                                         peer.metrics.underrun_blocks.load(Ordering::Relaxed);
+                                    peer.last_resets =
+                                        peer.metrics.buffer_resets.load(Ordering::Relaxed);
                                     peer.last_target_check = Instant::now();
                                     peer.last_target_decay = Instant::now();
                                     log::info!(
@@ -1026,9 +1034,26 @@ fn run(
                                         peer.metrics.underrun_blocks.load(Ordering::Relaxed);
                                     let delta = now_underruns
                                         .saturating_sub(peer.last_underruns);
+                                    let now_resets =
+                                        peer.metrics.buffer_resets.load(Ordering::Relaxed);
+                                    let reset_delta =
+                                        now_resets.saturating_sub(peer.last_resets);
                                     peer.last_underruns = now_underruns;
+                                    peer.last_resets = now_resets;
                                     peer.last_target_check = Instant::now();
-                                    if delta >= 1 && peer.bt_target_ms < BT_MAX_TARGET_MS {
+                                    if delta >= 1 && reset_delta >= 1 {
+                                        // Self-inflicted: the overflow trim dropped
+                                        // the buffer and the next burst arrived after
+                                        // the player had already starved. Deepening
+                                        // the target only makes the next trim bigger,
+                                        // so the loop stops here.
+                                        log::info!(
+                                            "stream {} underruns follow {} overflow trim(s), keeping buffer target {:.0} ms",
+                                            peer.id,
+                                            reset_delta,
+                                            peer.bt_target_ms
+                                        );
+                                    } else if delta >= 1 && peer.bt_target_ms < BT_MAX_TARGET_MS {
                                         let target =
                                             (peer.bt_target_ms + 50.0).min(BT_MAX_TARGET_MS);
                                         if mixer.set_stream_target_ms(peer.id, target) {
@@ -1213,6 +1238,7 @@ fn create_peer(
         last_mute_log: Instant::now(),
         analyzer: SpectrumAnalyzer::new(),
         last_underruns: 0,
+        last_resets: 0,
         last_target_check: Instant::now(),
         last_target_decay: Instant::now(),
         last_report: Instant::now(),

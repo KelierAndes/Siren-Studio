@@ -309,6 +309,23 @@ EngineHandle::snapshot() -> (MasterSnapshot, Vec<StreamSnapshot>)
 - 同窗口里 PC→hub 的 Wi-Fi 流 `lost 0`、欠载 0.12 次/秒、缓冲修剪 0.08 次/秒，与 2026-10-29 矩阵记录的 ~0.14 次/秒一致，非本次改动引入。
 - **D1（BLE L2CAP CoC）可行性**：Android 有明确的应用层 API（`BluetoothAdapter.listenUsingInsecureL2capChannel` / `BluetoothDevice.createInsecureL2capChannel`，API 29+），Linux 走 BlueZ 的 `AF_BLUETOOTH/BTPROTO_L2CAP`；**Windows 侧没有查到面向应用的 BLE CoC API**（Win32 `AF_BTH/BTPROTO_L2CAP` 面向 BR/EDR PSM，微软文档里能检索到的 CoC API 只有 Android 绑定）。因此 CoC 只能作为"手机↔Linux 叶子链路"的候选，桌面端仍得留在 RFCOMM/Wi-Fi 上——这条改造要动手前应先确认 Windows 的 API 面，否则三端异构反而增加链路种类。RFCOMM 的 `Link` 抽象确实可复用。
 
+### RF 层排查：蓝牙链路到底抖不抖（2026-11-02）
+
+给隧道中继加了**到达间隔分位数**量测（`bt.rs::GapWindow`，9 个桶 10/25/50/100/250/500/1000/2000/>2000 ms，每 5 s 出一个窗口），`hybrid.rs` 每 10 s 记一行：
+
+```
+bt: link quality: 2 link(s), tx 0.0 KB/s, rx 11.7 KB/s, write drops 0,
+    gap p50 10 p90 10 p99 50 max 43 ms, stalls >500 ms: 0 (6004 samples)
+```
+
+- **硬件事实**：NAS `8087:0a2a`（Intel 组合卡，HCI/LMP 4.2，`Link policy: RSWITCH HOLD SNIFF`）；PC `8087:0033`（Intel，驱动 24.40.10.3），且 **PC 走有线**——所以"BT 与 Wi-Fi 同频共存"在这条链路上不成立，只有手机侧自己共存。
+- **双栈稳态**（PC 为中心、2 条叶子链路）：rx 11.7 KB/s、tx 0 KB/s（按需下行，符合设计）、**p50 10 / p90 10 / p99 50 / max 43 ms、>500 ms 停顿 0 次、写丢弃 0**，样本 6004/10 s。
+- **纯蓝牙**（手机关 Wi-Fi）：tx 7.8 KB/s、rx 5.8 KB/s、**p50 10 / p90 25–50 / p99 100 / max 96–241 ms、停顿 0 次**。
+- **判定**：RFCOMM 链路与 piconet **不是**瓶颈；没有 sniff 停车的迹象（连续上行本身抑制 sniff），也没有共存重传的长尾。IMPROVEMENTS.md 里 P3"蓝牙频繁断连/欠载"的真正现场在**接收侧的 N−1 混音流**：`resets`（溢出修剪）与 `underruns`（饥饿）**1:1 同步增长**，而自适应环路把每一次自己造成的欠载都当成 RF 抖动去加深水位，一路推到 400 ms 上限——延迟涨了、欠载没停。
+- **已修**：环路加判据——同一 10 s 窗口里欠载与溢出修剪同时出现时**不再加深**（日志 `underruns follow N overflow trim(s), keeping buffer target 250 ms`），只追真正的饥饿。上限保留 400 ms：实测把它压到 300 ms 时延迟降了但欠载从 ~0.2 次/秒升到 ~0.45 次/秒，说明深缓冲只是在掩盖修剪后的饥饿，不能顺手改小。
+- **量测自身的假警报已修正**：叶子在 Wi-Fi 健康时下行按设计为空，早期版本把"窗口内无到达"合成成一条 5 s 停顿，把健康网络读成故障；现在如实报 `samples=0` 并写明"idle by design while Wi-Fi works"。
+- **被量测否决的备选方案**：蓝牙降级 16 kbps 单声道。实测空口负载只有 7.8 + 5.8 KB/s（基线上限 34–40 KB/s）且无停顿，省下 ~1 KB/s 治不了混音饥饿；而且它需要新的 codec 标记（Opus 裸包不自描述声道数，`decoders[2]` 要扩成 3 槽），成本不小。**下一步应查混音路径本身**：混音帧长 10 ms 与流帧长 5 ms 的时间基差异、以及掩码仲裁清空混音缓冲的时机。
+
 ### 图标字体（release 构建）
 
 - release 构建默认做 **图标树摇**；通过字段/记录间接传递的 `IconData` 可能被漏掉，导致按钮、面板标题、提示图标显示为空白。构建产物里的 `data/flutter_assets/fonts/MaterialIcons-Regular.otf` 若只有几 KB（完整字体约 1.6 MB）即可确认。

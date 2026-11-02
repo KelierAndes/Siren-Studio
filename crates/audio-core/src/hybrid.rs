@@ -375,6 +375,9 @@ fn supervise(
     let mut tx_window_bytes: u64 = 0;
     let mut last_hub_redial: Option<Instant> = None;
     let mut last_scan: Option<Instant> = None;
+    let mut last_quality_log = Instant::now();
+    let mut last_quality_tx = 0u64;
+    let mut last_quality_rx = 0u64;
     // TTL blacklist: a device that refused RFCOMM channel 16 is skipped for a
     // while so repeated inquiries walk further down the list instead of
     // retrying the same accessories forever.
@@ -886,6 +889,44 @@ fn supervise(
         // succeed into buffers, reads block, and the leaf never re-dials.
         // If no byte arrives for six seconds while a link exists, reset it.
         let stats = tunnel.stats();
+        // The RF diagnosis needs the gap *shape*, not just byte counts: sniff
+        // parking, coexistence retransmission and piconet sharing all look like
+        // "fewer bytes" in a counter.
+        if stats.links > 0 && last_quality_log.elapsed() >= Duration::from_secs(10) {
+            // A leaf's Bluetooth downlink is idle by design while its Wi-Fi is
+            // healthy, so the receive-side percentiles only mean something when
+            // traffic is actually flowing. Report the send side and the write
+            // drops next to them, and say how much was received.
+            let seconds = last_quality_log.elapsed().as_secs_f64().max(1.0);
+            let tx_kb_s =
+                stats.tx_bytes.saturating_sub(last_quality_tx) as f64 / 1024.0 / seconds;
+            let rx_kb_s =
+                stats.rx_bytes.saturating_sub(last_quality_rx) as f64 / 1024.0 / seconds;
+            last_quality_tx = stats.tx_bytes;
+            last_quality_rx = stats.rx_bytes;
+            last_quality_log = Instant::now();
+            let gaps = if stats.gap_samples == 0 {
+                "no downlink packets (idle by design while Wi-Fi works)".to_string()
+            } else {
+                format!(
+                    "gap p50 {} p90 {} p99 {} max {} ms, stalls >500 ms: {} ({} samples)",
+                    stats.gap_p50_ms,
+                    stats.gap_p90_ms,
+                    stats.gap_p99_ms,
+                    stats.gap_max_ms,
+                    stats.gap_stalls_500ms,
+                    stats.gap_samples,
+                )
+            };
+            log::info!(
+                "bt: link quality: {} link(s), tx {:.1} KB/s, rx {:.1} KB/s, write drops {}, {}",
+                stats.links,
+                tx_kb_s,
+                rx_kb_s,
+                stats.dropped,
+                gaps,
+            );
+        }
         if stats.links > 0 {
             last_rx_bytes = stats.rx_bytes;
             last_rx_at = Instant::now();
@@ -975,6 +1016,11 @@ fn supervise(
             tx_bytes: stats.tx_bytes,
             rx_bytes: stats.rx_bytes,
             dropped: stats.dropped,
+            gap_samples: stats.gap_samples,
+            gap_p99_ms: stats.gap_p99_ms,
+            gap_max_ms: stats.gap_max_ms,
+            gap_stalls_500ms: stats.gap_stalls_500ms,
+            rx_kb_per_s: stats.gap_kb_per_s,
             last_error: last_error.clone(),
         };
         mesh.set_bt_status(status);
