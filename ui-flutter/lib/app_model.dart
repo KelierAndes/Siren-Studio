@@ -46,6 +46,8 @@ class AppModel extends ChangeNotifier {
   bool _disposed = false;
   bool _dirty = false;
   bool _meshPollError = false;
+  bool _leaveRequested = false;
+  bool _faultReported = false;
   final bool _uiDebug = Platform.environment['SIREN_UI_DEBUG'] == '1';
   int _pollCount = 0;
 
@@ -87,6 +89,18 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
     try {
       uiEvent('startMesh: begin');
+      // A node that died on its own stays registered until we re-join: its
+      // port is already free but the registry slot would reject the new start.
+      final stale = _meshId;
+      if (stale != null) {
+        try {
+          rust.meshStop(id: stale);
+          rust.meshRelease(id: stale);
+        } catch (_) {}
+        _meshId = null;
+      }
+      _leaveRequested = false;
+      _faultReported = false;
       final config = {
         'bind': '0.0.0.0',
         'port': int.tryParse(
@@ -159,12 +173,23 @@ class AppModel extends ChangeNotifier {
   void stopMesh() {
     final id = _meshId;
     if (id == null) return;
+    _leaveRequested = true;
     if (rust.meshStop(id: id)) {
       _log('正在离开组网…');
       notifyListeners();
     } else {
       _log('离开组网失败：节点已不存在', isError: true);
+      _finishLeave(id);
     }
+  }
+
+  void _finishLeave(BigInt id) {
+    try {
+      rust.meshRelease(id: id);
+    } catch (_) {}
+    _meshId = null;
+    _leaveRequested = false;
+    _faultReported = false;
   }
 
   void setStreamGain(int streamId, double gainDb) {
@@ -235,19 +260,25 @@ class AppModel extends ChangeNotifier {
         if (decoded is Map) {
           final map = Map<String, dynamic>.from(decoded);
           if (map['error'] != null) {
-            rust.meshRelease(id: meshId);
-            _meshId = null;
+            _finishLeave(meshId);
             _log('组网节点已释放');
             changed = true;
           } else {
             final next = MeshState.fromJson(map);
             mesh = next;
             changed = true;
-            if (!next.running && !next.stopping) {
-              rust.meshRelease(id: meshId);
-              _meshId = null;
+            if (!next.running && _leaveRequested) {
+              // The user asked to leave: complete the teardown now that the
+              // sender loop is done.
+              _finishLeave(meshId);
               _log('已离开组网');
-              changed = true;
+            } else if (!next.running && !_faultReported) {
+              // The node stopped without a leave request. Releasing it here
+              // would turn a diagnosable fault into a vanished node, so keep
+              // it registered and let the user re-join explicitly.
+              _faultReported = true;
+              lastError = '组网节点已停止，请重新点击「加入组网」';
+              _log(lastError!, isError: true);
             }
           }
         }

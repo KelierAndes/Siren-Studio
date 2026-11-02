@@ -454,7 +454,9 @@ impl MeshEngine {
     }
 
     pub fn stop(&self) {
-        self.shared.stop.store(true, Ordering::Relaxed);
+        if !self.shared.stop.swap(true, Ordering::Relaxed) {
+            crate::engine::stop_trace("mesh");
+        }
         self.center.stop();
     }
 }

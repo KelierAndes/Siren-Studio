@@ -745,6 +745,10 @@ function bindStatic() {
     state.busy = true;
     render();
     try {
+      // Decide from the server, not from a status that can be up to a poll
+      // interval stale: a "join" click that hit a stale "running" read used to
+      // post /api/stop and leave the page showing an unjoined node.
+      await poll();
       if (state.status?.running) await post("/api/stop", {});
       else await post("/api/start", configFromForm());
     } catch (error) { state.error = error.message; }

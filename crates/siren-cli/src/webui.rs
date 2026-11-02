@@ -316,6 +316,7 @@ async fn start(State(state): State<Arc<WebState>>, Json(config): Json<UiConfig>)
 }
 
 async fn leave(State(state): State<Arc<WebState>>) -> Response {
+    log::info!("webui: leave requested");
     let node = {
         let mut inner = state.inner.lock().unwrap();
         if inner.starting {
@@ -457,6 +458,54 @@ pub fn run(args: WebArgs) -> anyhow::Result<()> {
                 state.inner.lock().unwrap().error = Some(error.to_string());
             }
         }
+    }
+
+    // The panel reports "joined" as long as a node is registered, so a node
+    // whose sender loop went away would leave the hub silent and marked as
+    // healthy until someone restarted it. Re-join with the same settings.
+    {
+        let heal = state.clone();
+        let heal_stop = stop.clone();
+        let _ = std::thread::Builder::new()
+            .name("siren-web-heal".into())
+            .spawn(move || loop {
+                std::thread::sleep(Duration::from_secs(2));
+                if heal_stop.load(Ordering::Relaxed) {
+                    return;
+                }
+                let dead = {
+                    let inner = heal.inner.lock().unwrap();
+                    inner
+                        .node
+                        .as_ref()
+                        .map(|node| !node.snapshot().running)
+                        .unwrap_or(false)
+                };
+                if !dead {
+                    continue;
+                }
+                log::warn!("webui: mesh node stopped unexpectedly, re-joining");
+                let dead_node = {
+                    let mut inner = heal.inner.lock().unwrap();
+                    inner.starting = true;
+                    inner.node.take()
+                };
+                drop(dead_node);
+                let config = heal.inner.lock().unwrap().config.clone();
+                match start_engine(&config) {
+                    Ok(node) => {
+                        let mut inner = heal.inner.lock().unwrap();
+                        inner.node = Some(node);
+                        inner.starting = false;
+                    }
+                    Err(error) => {
+                        let mut inner = heal.inner.lock().unwrap();
+                        inner.starting = false;
+                        inner.error = Some(error.clone());
+                        log::warn!("webui: re-join failed: {error}");
+                    }
+                }
+            });
     }
 
     let app = Router::new()

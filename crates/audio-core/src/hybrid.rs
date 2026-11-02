@@ -199,7 +199,9 @@ impl HybridNode {
     }
 
     pub fn stop(&self) {
-        self.stop.store(true, Ordering::Relaxed);
+        if !self.stop.swap(true, Ordering::Relaxed) {
+            crate::engine::stop_trace("hybrid");
+        }
         if let Some(listener) = self.shared.listener.lock().unwrap().take() {
             listener.close();
         }
@@ -210,9 +212,17 @@ impl HybridNode {
 
 impl Drop for HybridNode {
     fn drop(&mut self) {
+        log::info!("hybrid: HybridNode dropped");
         self.stop();
         if let Some(join) = self.join.lock().unwrap().take() {
-            let _ = join.join();
+            // The supervisor can be inside a blocking RFCOMM connect, so it is
+            // reaped in the background instead of holding up whoever dropped
+            // the node (the FFI release runs on the UI's poll thread).
+            let _ = thread::Builder::new()
+                .name("siren-hybrid-reaper".into())
+                .spawn(move || {
+                    let _ = join.join();
+                });
         }
     }
 }

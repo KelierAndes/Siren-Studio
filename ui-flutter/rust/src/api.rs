@@ -478,6 +478,7 @@ fn mesh_set_master_gain_db_inner(id: u64, db: f32) -> bool {
 }
 
 fn mesh_stop_inner(id: u64) -> bool {
+    log::info!("ffi: mesh_stop({id}) requested");
     match meshes().lock() {
         Ok(meshes) => match meshes.get(&id) {
             Some(node) => {
@@ -491,10 +492,17 @@ fn mesh_stop_inner(id: u64) -> bool {
 }
 
 fn mesh_release_inner(id: u64) -> bool {
-    match meshes().lock() {
-        Ok(mut meshes) => meshes.remove(&id).is_some(),
-        Err(_) => false,
-    }
+    // Take the node out under the lock, then tear it down outside of it:
+    // dropping a node closes sockets and reaps threads, and holding the
+    // registry mutex across that blocks the UI's status poll.
+    let node = match meshes().lock() {
+        Ok(mut meshes) => meshes.remove(&id),
+        Err(_) => None,
+    };
+    log::info!("ffi: mesh_release({id}) requested");
+    let released = node.is_some();
+    drop(node);
+    released
 }
 
 fn mesh_is_running_inner(id: u64) -> bool {

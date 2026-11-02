@@ -272,6 +272,18 @@ EngineHandle::snapshot() -> (MasterSnapshot, Vec<StreamSnapshot>)
   - **自动角色（不显式选择）**：按 mesh 内最小节点编号推导——本机 `bt_bit` == 中心 `bt_hub_bit` 时自动监听，其余节点连接中心蓝牙地址；修改中心/编号会重启蓝牙链路（短暂中断）。实测：Linux（bit1=hub）监听、手机（bit2）连接，双向 **−15 dB** 连续。
   - 说明：当前为“编号+中心地址”推导角色；跨节点自动交换蓝牙地址/最小节点接管（真正拓扑收敛）与 Android/Windows 应用内选择仍是后续工作。
 
+### 节点退出归因与自愈
+
+`center sink: loop exited` + `mesh: MeshEngine dropped` 曾被当成“流超时/蓝牙链路结束时引擎自毁”。实际语义是：**center sink 的循环只在 `stop` 被置位时退出**，所以这两行必然来自一次显式 stop/release；流超时（`net/udp.rs` 的 `peers.retain`）与链路结束（`bt.rs` 的 `Event::LinkClosed`）只删除该流/该链路，从不触碰引擎。为此现在每次退出都带调用者：
+
+- 引擎侧：`CenterEngine::stop` / `MeshEngine::stop` / `HybridNode::stop` 只在 false→true 的那一次记 `... stop requested by <线程名>` 并附 backtrace；`HybridNode` 另有 `HybridNode dropped`。
+- 载体侧：FFI 记 `ffi: mesh_stop(id) requested` / `ffi: mesh_release(id) requested`，WebUI 记 `webui: leave requested`。线程名即可分辨来源（FFI 调用来自未命名线程，WebUI 来自 `tokio-rt-worker`，CLI 来自 `main`）。
+- 客户端策略（Flutter `AppModel`）：旧代码 `_poll` 里 `if (!running && !stopping) meshRelease`，而 `stopping = running && stop` 恒等于 `running`，条件实际就是“只要没在跑就销毁节点”，任何抖动都会把节点拆掉。现在只有用户点过“离开组网”（`_leaveRequested`）才收尾释放；引擎自己停下时保留注册、提示“请重新点击「加入组网」”，重新加入前先把旧 id 停掉并释放（否则端口/注册位会被死节点占住）。
+- WebUI 页面：加入/离开按钮先 `await poll()` 拿服务端真实状态再决定动作，不再用最多滞后一个轮询周期的缓存——旧写法会把“加入”点击变成一次 `/api/stop` 且不再 start，表现即“点了加入但仍是未组网”。
+- 守护进程自愈：`webui.rs` 每 2 s 检查已注册节点的 `snapshot.running`，为 false 就用同一份配置重新入网并记 `webui: mesh node stopped unexpectedly, re-joining`；用户显式离开时节点已从状态里取走，看门狗不会与离开对抗。
+- 释放路径：`mesh_release_inner` 先在注册表锁内取出节点、在锁外 drop；`HybridNode::drop` 用后台 reaper 线程 join 监督线程（它可能正卡在 RFCOMM 连接里），避免释放卡住 UI 的状态轮询。
+- 实测（2026-11-02，Linux hub + Windows 桌面端 + Android 三端）：杀掉叶子设备后，两端各出现 `stream ... timed out` 与 `bt: link ... reader ended`，三端 `running` 保持 true、无 `MeshEngine dropped`、桌面端进程存活；桌面端真实点击“离开组网→加入组网”得到完整归因链（`ffi: mesh_stop(1)` → `hybrid/mesh/center: stop requested` → `ffi: mesh_release(1)` → `MeshEngine dropped` → `ffi: mesh 2 registered`）；WebUI 同样点击链为 `webui: leave requested` → `stop requested by tokio-rt-worker` → 重新入网 `center: ready`，看门狗未误触发。
+
 ### 图标字体（release 构建）
 
 - release 构建默认做 **图标树摇**；通过字段/记录间接传递的 `IconData` 可能被漏掉，导致按钮、面板标题、提示图标显示为空白。构建产物里的 `data/flutter_assets/fonts/MaterialIcons-Regular.otf` 若只有几 KB（完整字体约 1.6 MB）即可确认。

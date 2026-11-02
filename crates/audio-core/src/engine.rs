@@ -350,7 +350,11 @@ impl CenterEngine {
     }
 
     pub fn stop(&self) {
-        self.shared.stop.store(true, Ordering::Relaxed);
+        // Teardown has to be attributable: a center that stops without the UI
+        // asking for it silently drops every stream in the mesh.
+        if !self.shared.stop.swap(true, Ordering::Relaxed) {
+            stop_trace("center");
+        }
     }
 
     pub fn set_gain_db(&self, stream: u64, gain_db: f32) -> bool {
@@ -385,6 +389,23 @@ impl CenterEngine {
                 .map_err(|_| CoreError::Backend("center is stopping".into())),
             None => Err(CoreError::Backend("center control is not available".into())),
         }
+    }
+}
+
+/// Names the thread that asked an engine to stop. Release builds ship without
+/// symbols, so the full backtrace stays behind `SIREN_STOP_TRACE=1`.
+pub(crate) fn stop_trace(component: &str) {
+    let thread = std::thread::current()
+        .name()
+        .unwrap_or("<unnamed thread>")
+        .to_string();
+    if std::env::var_os("SIREN_STOP_TRACE").is_some() {
+        log::info!(
+            "{component}: stop requested by {thread}\n{}",
+            std::backtrace::Backtrace::force_capture()
+        );
+    } else {
+        log::info!("{component}: stop requested by {thread}");
     }
 }
 
