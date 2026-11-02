@@ -40,8 +40,24 @@ void main() {
         peers: 3,
         devices: 3,
       );
-    model.channels[0].setFacts(rms: -18.5, path: 'Wi-Fi', lost: 3, under: 1, health: 0);
-    model.channels[1].setFacts(rms: -9.2, path: '蓝牙', lost: 0, under: 0, health: 1);
+    model.channels[0].setFacts(
+      rms: -18.5,
+      path: 'Wi-Fi',
+      lost: 3,
+      under: 1,
+      health: 0,
+      bufferMs: 128,
+      bufferMaxMs: 250,
+    );
+    model.channels[1].setFacts(
+      rms: -9.2,
+      path: '蓝牙',
+      lost: 0,
+      under: 0,
+      health: 1,
+      bufferMs: 232,
+      bufferMaxMs: 810,
+    );
 
     await tester.pumpWidget(
       MaterialApp(
@@ -59,6 +75,9 @@ void main() {
     expect(find.text('欠载'), findsNWidgets(2));
     expect(find.text('-18.5'), findsOneWidget);
     expect(find.text('Wi-Fi'), findsOneWidget);
+    expect(find.text('缓冲'), findsAtLeastNWidgets(2));
+    expect(find.text('128'), findsOneWidget);
+    expect(find.text(' / 250 ms'), findsOneWidget);
 
     model.setStreamPage(1);
     await tester.pump(const Duration(milliseconds: 40));
@@ -87,7 +106,15 @@ void main() {
       ])
       ..setJoined(true)
       ..setStatusText('组网中 · 2 台');
-    model.channels[0].setFacts(rms: -15.5, path: 'Wi-Fi', lost: 0, under: 0, health: 0);
+    model.channels[0].setFacts(
+      rms: -15.5,
+      path: 'Wi-Fi',
+      lost: 0,
+      under: 0,
+      health: 0,
+      bufferMs: 96,
+      bufferMaxMs: 250,
+    );
 
     await tester.pumpWidget(
       MaterialApp(
@@ -99,6 +126,7 @@ void main() {
     expect(find.text('本机'), findsOneWidget);
     expect(find.text('组网'), findsOneWidget);
     expect(find.text('当前电平'), findsNWidgets(2));
+    expect(find.text('缓冲'), findsWidgets);
     expect(find.text('BYPASS'), findsOneWidget);
   });
 }

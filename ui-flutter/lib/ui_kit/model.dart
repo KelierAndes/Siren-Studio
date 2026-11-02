@@ -74,6 +74,9 @@ class ModuleChannel extends ChangeNotifier {
   String pathText = '—';
   int lostFrames = 0;
   int underruns = 0;
+  /// Live buffer depth and its overflow-trim ceiling, in ms.
+  double bufferMs = 0;
+  double bufferMaxMs = 0;
   /// 0 good, 1 fair, 2 poor, 3 unknown/offline.
   int health = 3;
   /// Unit shown below the big knob (dB for gain, ms for a target).
@@ -176,12 +179,16 @@ class ModuleChannel extends ChangeNotifier {
     required int lost,
     required int under,
     required int health,
+    required double bufferMs,
+    required double bufferMaxMs,
   }) {
     if ((rmsDb - rms).abs() < .01 &&
         pathText == path &&
         lostFrames == lost &&
         underruns == under &&
-        this.health == health) {
+        this.health == health &&
+        (this.bufferMs - bufferMs).abs() < .5 &&
+        (this.bufferMaxMs - bufferMaxMs).abs() < .5) {
       return;
     }
     rmsDb = rms;
@@ -189,6 +196,8 @@ class ModuleChannel extends ChangeNotifier {
     lostFrames = lost;
     underruns = under;
     this.health = health;
+    this.bufferMs = bufferMs;
+    this.bufferMaxMs = bufferMaxMs;
     notifyListeners();
   }
 

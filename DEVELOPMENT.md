@@ -337,11 +337,16 @@ bt: link quality: 2 link(s), tx 0.0 KB/s, rx 11.7 KB/s, write drops 0,
 - 平台分流：Windows/Linux/macOS 用 `PulsarDevice` + 自绘标题栏（`window_manager` 无边框，1240×800 起）；Android 用 `MobileDevice` 全屏（SafeArea 内等比缩放）。
 - **三端同构（2026-10-31）**：`ui-flutter/lib/ui_kit/panels.dart` 抽出共用组件 `TopStatusPill` / `LocalCard` / `MeshCard` / `BottomStrip`，桌面 `device.dart` 与手机 `mobile_device.dart` 都用它；Linux WebUI（`webui/index.html`）按同一结构用 CSS 复刻。三端都是：顶栏品牌 + 状态胶囊（内含 `‹ 页码 ›`）+ 远端路数 → EQ 屏 → 一排卡片（两张设备卡 + 两张系统卡）→ 系统卡下方的底栏。
 - **桌面布局按 BASSMAKER 原始效果图比例还原**：画布 1180×760，面板内 1036×596 = 屏 316 + 间隙 12 + 卡片行 268（屏占 53%，与参考图 150/273 一致）。卡片行：`IN 34 | 设备卡 242 | 设备卡 242 | 系统卡 217 | 系统卡 217 | OUT 34`（间隙 10，合计 1036）；两张窄系统卡下方压一条 444×66 的底栏，对应参考图的 `HP —— LP / DRY / WET / BYPASS`。
-  - **设备卡**（`stream_card.dart`，242×268；手机 362×232）：标题行右侧三枚 = 连接状态灯 / 信号质量灯 / 一键静音（扬声器图标，静音整键变红、卡片变暗、曲线转淡）；主体左列只有一颗大增益旋钮（`-60 / +12` + `增益`），右列是电平窗（`当前电平` + 数值 + 电平条）与路径/丢帧/欠载。卡片宽度 ≥ 约 330 时电平窗与事实条自动改为左右排（手机就是这样）。
+  - **设备卡**（`stream_card.dart`，242×268；手机 362×232）：标题行右侧三枚 = 连接状态灯 / 信号质量灯 / 一键静音（扬声器图标，静音整键变红、卡片变暗、曲线转淡）；主体左列只有一颗大增益旋钮（`-60 / +12` + `增益`），右列是电平窗（`当前电平` + 数值 + 电平条 + `缓冲 当前 / 上限 ms`）与路径/丢帧/欠载。卡片宽度 ≥ 约 330 时电平窗与事实条自动改为左右排（手机就是这样）。
   - **系统卡**（217×189，无旋钮）：本机 = 节点名输入框 + 音源胶囊 + 音调滑块；组网 = 角色/链路读数窗 + 加入/离开按钮。缓冲、主增益、本地播放、BYPASS 全部在底栏；手机底栏用 `twoRow` 排成两行。
   - **手机**：同两页、同一批卡片，纵向堆叠在 `SingleChildScrollView` 里，屏下方多两条 IN/OUT 横向电平表；标题栏有亮/暗切换。设置弹层已删除。
   - **WebUI**：同一结构，设备卡的“旋钮”用 CSS 圆盘 + 指针，上下拖动/滚轮改增益（300 ms 防抖后 POST `/api/streams/{id}`）；EQ 曲线用快照里的 `spectrum` 实时绘制，`◀ 页码 ▶` 翻页；本地播放与 BYPASS 与 Flutter 语义一致（本地播放在下次加入时生效）。
   - **信号质量**：没有 RSSI 可用，按最近事件估算——丢帧/欠载计数一旦增长就记一次事件，1 s 内为红、4 s 内为黄、否则绿，流不在线则灭。
+- **缓冲读数（2026-11-02）**：电平窗第三行显示 `缓冲 当前 / 上限 ms`，用于调试抖动缓冲。
+  - 当前值取 `StreamMetrics.buffer_frames` 换算的毫秒；上限取**溢出修剪阈值**而不是缓冲池容量：`fill_ceiling_ms(target) = 2 × target + 10 ms`（`dsp/resampler.rs`，与热路径共用同一个助手，窗上写的就是真会触发修剪的那条线），并按接收环的物理容量 1 s 截断——否则 500 ms 目标会显示一条永远到不了的上限。
+  - 该值由 `StreamSnapshot.buffer_max_ms` 随快照下发，三端各自渲染：Flutter 走 `StreamState.bufferMs/bufferMaxMs` → `ModuleChannel.setFacts` → `_LevelWindow`；WebUI 走 `.buf` 行（`slotMarkup` + 轮询增量更新）。
+  - 超过 90 % 上限显示红、70 % 显示黄：接近上限意味着链路抖动正被修剪掉，是 MIX1（N−1 混音流修剪↔欠载自激）最直接的观测点。
+  - 为了让混音流（`0xFFF0`）也能被看到，WebUI 的卡片列表改用 `slotStreams`（含混音流），与 Flutter 端一致；设备台数与 EQ 图例仍按 `deviceStreams`（不含混音流）统计。
 - 主题：标题栏亮/暗切换；浅色 token 的强调色使用压深版本。`SIREN_UI_FORCE_MOBILE=1` 可在桌面预览手机布局。
 - 旧 `shell.dart` / `mobile_shell.dart` 不再被 `main.dart` 引用，保留仅作历史实现参考；新代码不依赖 BASSMAKER 工程本身。
 

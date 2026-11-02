@@ -190,7 +190,15 @@ class SirenBinding {
         final stream = _streamAt(i);
         if (stream == null) {
           channel.setTitle('等待节点');
-          channel.setFacts(rms: -60, path: '—', lost: 0, under: 0, health: 3);
+          channel.setFacts(
+            rms: -60,
+            path: '—',
+            lost: 0,
+            under: 0,
+            health: 3,
+            bufferMs: 0,
+            bufferMaxMs: 0,
+          );
           channel.syncAmount(-60);
           channel.syncMute(false);
           channel.syncOn(false);
@@ -202,6 +210,8 @@ class SirenBinding {
             lost: stream.lostFrames,
             under: stream.underruns,
             health: health[stream.id] ?? 3,
+            bufferMs: stream.bufferMs,
+            bufferMaxMs: stream.bufferMaxMs,
           );
           channel.syncAmount(stream.gainDb);
           channel.syncMute(stream.muted);

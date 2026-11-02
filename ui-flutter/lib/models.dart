@@ -80,6 +80,7 @@ class StreamState {
     required this.peakHoldDb,
     required this.bufferMs,
     required this.targetMs,
+    required this.bufferMaxMs,
     required this.ratio,
     required this.underruns,
     required this.underrunFrames,
@@ -109,6 +110,8 @@ class StreamState {
   final double peakHoldDb;
   final double bufferMs;
   final double targetMs;
+  /// Overflow-trim ceiling (2× target + 10 ms): above this the buffer is cut.
+  final double bufferMaxMs;
   final double ratio;
   final int underruns;
   final int underrunFrames;
@@ -137,6 +140,7 @@ class StreamState {
         peakHoldDb: _d(json['peak_hold_db']),
         bufferMs: _d(json['buffer_ms']),
         targetMs: _d(json['target_ms']),
+        bufferMaxMs: _d(json['buffer_max_ms']),
         ratio: _d(json['ratio']),
         underruns: _i(json['underruns']),
         underrunFrames: _i(json['underrun_frames']),

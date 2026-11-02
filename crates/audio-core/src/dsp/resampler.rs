@@ -20,6 +20,18 @@ const FILL_SMOOTHING_S: f64 = 0.3;
 /// drift correction to drain it.
 const MAX_FILL_RATIO: f64 = 2.0;
 const FILL_HEADROOM_MS: f64 = 10.0;
+
+/// Buffer level above which the mixer drops the oldest audio to pull latency
+/// back to target. The hot path and the UIs share this so the ceiling a panel
+/// shows is the ceiling that will actually fire.
+pub fn fill_ceiling_frames(target_frames: f64) -> f64 {
+    target_frames * MAX_FILL_RATIO + frames_for_ms(FILL_HEADROOM_MS as f32) as f64
+}
+
+pub fn fill_ceiling_ms(target_ms: f32) -> f32 {
+    ms_for_frames(fill_ceiling_frames(frames_for_ms(target_ms) as f64) as usize)
+}
+
 /// The integral term leaks so a startup overshoot cannot keep the buffer
 /// draining for a minute; the steady-state error stays far below 1 ms.
 const INTEGRAL_LEAK_PER_S: f64 = 0.2;
@@ -114,8 +126,7 @@ impl DriftResampler {
         }
 
         let available = self.len_frames + rx.slots() / CHANNELS;
-        let reset_threshold =
-            self.target_frames * MAX_FILL_RATIO + frames_for_ms(FILL_HEADROOM_MS as f32) as f64;
+        let reset_threshold = fill_ceiling_frames(self.target_frames);
         if self.started && available as f64 > reset_threshold {
             // Drop the oldest audio down to the target. This only happens
             // after a long stall; the alternative is minutes of added latency.
@@ -285,6 +296,15 @@ fn hermite(y0: f32, y1: f32, y2: f32, y3: f32, t: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ceiling_is_two_targets_plus_headroom() {
+        // Guards the ms/frames composition: feeding ms into the frames helper
+        // used to report 11.25 ms for a 30 ms target, below the target itself.
+        assert!((fill_ceiling_ms(30.0) - 70.0).abs() < 0.05);
+        assert!((fill_ceiling_ms(400.0) - 810.0).abs() < 0.05);
+        assert!(fill_ceiling_ms(30.0) > 30.0);
+    }
 
     struct Tone {
         phase: f64,

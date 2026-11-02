@@ -22,7 +22,7 @@ use crate::metrics::{linear_to_db, now_us, store_f32, MetricsRegistry, StreamMet
 use crate::protocol::{Codec, FrameHeader};
 use crate::{CoreError, Result};
 
-const PEER_RING_SAMPLES: usize = SAMPLE_RATE as usize * CHANNELS; // one second
+pub(crate) const PEER_RING_SAMPLES: usize = SAMPLE_RATE as usize * CHANNELS; // one second
 const MAX_PLC_PACKETS: u32 = 6;
 const MAX_GAP_FILL_MS: f32 = 100.0;
 const PEER_TIMEOUT: Duration = Duration::from_secs(3);
@@ -627,7 +627,9 @@ impl Peer {
         let frames = samples.len() / CHANNELS;
         let (_, rest) = self.producer.push_partial_slice(&samples);
         if !rest.is_empty() {
-            self.metrics.overflow_packets.fetch_add(1, Ordering::Relaxed);
+            self.metrics
+                .overflow_packets
+                .fetch_add(1, Ordering::Relaxed);
         }
         Ok(frames)
     }
@@ -667,9 +669,13 @@ impl Peer {
         let mut remaining = frames.min(frames_for_ms(MAX_GAP_FILL_MS) as u32);
         while remaining > 0 {
             let chunk = remaining.min((self.zero_buf.len() / CHANNELS) as u32) as usize;
-            let (_, rest) = self.producer.push_partial_slice(&self.zero_buf[..chunk * CHANNELS]);
+            let (_, rest) = self
+                .producer
+                .push_partial_slice(&self.zero_buf[..chunk * CHANNELS]);
             if !rest.is_empty() {
-                self.metrics.overflow_packets.fetch_add(1, Ordering::Relaxed);
+                self.metrics
+                    .overflow_packets
+                    .fetch_add(1, Ordering::Relaxed);
                 break;
             }
             remaining -= chunk as u32;
@@ -731,9 +737,7 @@ fn run(
                 let now = Instant::now();
                 if !is_mix && header.origin != 0 {
                     known_normals.insert(header.origin, (now, !is_bt));
-                    known_normals.retain(|_, (at, _)| {
-                        now.duration_since(*at) < KNOWN_NORMAL_TTL
-                    });
+                    known_normals.retain(|_, (at, _)| now.duration_since(*at) < KNOWN_NORMAL_TTL);
                 }
                 if is_mix {
                     // A mix carries a bitmask of the origins inside it. It is
@@ -799,9 +803,8 @@ fn run(
                 if !is_bt {
                     peer.last_wifi_seen = now;
                 }
-                let tap_bt = is_bt
-                    && now.duration_since(peer.last_wifi_seen)
-                        > Duration::from_millis(300);
+                let tap_bt =
+                    is_bt && now.duration_since(peer.last_wifi_seen) > Duration::from_millis(300);
 
                 // Sequence bookkeeping: duplicate / reordering / loss.
                 //
@@ -826,8 +829,7 @@ fn run(
                 // and accepting those stale bursts would make the timeline
                 // jump back and forth.
                 let is_bt = addr.ip().is_loopback();
-                let switched =
-                    is_bt != peer.last_path_bt || header.codec != peer.last_codec;
+                let switched = is_bt != peer.last_path_bt || header.codec != peer.last_codec;
                 let stalled = peer.last_seen.elapsed() > CARRIER_STALL;
                 // What the listener actually loses: the span between two
                 // accepted packets. A carrier switch that keeps the sequence
@@ -848,10 +850,7 @@ fn run(
                 let mut gap = 0u32;
                 if let Some(last) = peer.last_seq {
                     let diff = header.seq.wrapping_sub(last) as i32;
-                    if switched
-                        && diff.abs() > CARRIER_RESYNC_FRAMES
-                        && (diff > 0 || stalled)
-                    {
+                    if switched && diff.abs() > CARRIER_RESYNC_FRAMES && (diff > 0 || stalled) {
                         log::info!(
                             "udp: stream {} carrier switch {} -> {}, timeline {} {} frames",
                             peer.id,
@@ -904,8 +903,7 @@ fn run(
                     // as "the mesh went silent", whether or not we also flushed.
                     // Start the same trace so the mute gets attributed.
                     const AUDIBLE_GAP_MS: f64 = 400.0;
-                    let synth_ms =
-                        crate::format::ms_for_frames(lost as usize) as f64;
+                    let synth_ms = crate::format::ms_for_frames(lost as usize) as f64;
                     if synth_ms > AUDIBLE_GAP_MS && peer.switch.is_none() {
                         peer.switch = Some(SwitchTrace {
                             from: if peer.last_path_bt { "bt" } else { "wifi" },
@@ -1032,12 +1030,10 @@ fn run(
                                 if peer.last_target_check.elapsed() >= Duration::from_secs(10) {
                                     let now_underruns =
                                         peer.metrics.underrun_blocks.load(Ordering::Relaxed);
-                                    let delta = now_underruns
-                                        .saturating_sub(peer.last_underruns);
+                                    let delta = now_underruns.saturating_sub(peer.last_underruns);
                                     let now_resets =
                                         peer.metrics.buffer_resets.load(Ordering::Relaxed);
-                                    let reset_delta =
-                                        now_resets.saturating_sub(peer.last_resets);
+                                    let reset_delta = now_resets.saturating_sub(peer.last_resets);
                                     peer.last_underruns = now_underruns;
                                     peer.last_resets = now_resets;
                                     peer.last_target_check = Instant::now();
@@ -1284,8 +1280,9 @@ mod tests {
         let first = UdpSocket::bind("127.0.0.1:0").expect("socket a");
         let second = UdpSocket::bind("127.0.0.1:0").expect("socket b");
         let frames = frames_for_ms(5.0);
-        let mut datagram =
-            FrameHeader::new(Codec::RawF32, 5, 77, 1, now_us(), 0xABCD_1234).encode().to_vec();
+        let mut datagram = FrameHeader::new(Codec::RawF32, 5, 77, 1, now_us(), 0xABCD_1234)
+            .encode()
+            .to_vec();
         for _ in 0..frames * CHANNELS {
             datagram.extend_from_slice(&0.1f32.to_le_bytes());
         }
@@ -1312,14 +1309,9 @@ mod tests {
     fn bluetooth_carrier_shares_primary_sequence() {
         let pcm = vec![0.1f32; frames_for_ms(5.0) * CHANNELS];
         let mut wifi = FramePacker::new(Codec::RawF32, 5, 0xABC).expect("wifi packer");
-        let mut bt = FramePacker::with_stream(
-            Codec::Opus,
-            5,
-            0xABC,
-            wifi.stream_id(),
-            Some(32_000),
-        )
-        .expect("bt packer");
+        let mut bt =
+            FramePacker::with_stream(Codec::Opus, 5, 0xABC, wifi.stream_id(), Some(32_000))
+                .expect("bt packer");
         // Let the primary run ahead, as it does while the tunnel is still
         // connecting. The secondary must adopt the primary's sequence rather
         // than counting on its own.
@@ -1376,7 +1368,9 @@ mod tests {
         for _ in 0..frames * CHANNELS {
             raw.extend_from_slice(&0.1f32.to_le_bytes());
         }
-        socket.send_to(&raw, receiver.local_addr).expect("send wifi");
+        socket
+            .send_to(&raw, receiver.local_addr)
+            .expect("send wifi");
         std::thread::sleep(Duration::from_millis(300));
 
         let snapshots = receiver.registry.snapshots();
@@ -1415,7 +1409,9 @@ mod tests {
         for _ in 0..frames * CHANNELS {
             good.extend_from_slice(&0.1f32.to_le_bytes());
         }
-        socket.send_to(&good, receiver.local_addr).expect("send good");
+        socket
+            .send_to(&good, receiver.local_addr)
+            .expect("send good");
         std::thread::sleep(Duration::from_millis(300));
 
         let snapshots = receiver.registry.snapshots();
@@ -1432,10 +1428,9 @@ mod tests {
     #[test]
     fn carrier_switch_resyncs_instead_of_zero_filling() {
         fn raw_packet(seq: u32, stream: u16, origin: u64, frames: usize) -> Vec<u8> {
-            let mut packet =
-                FrameHeader::new(Codec::RawF32, 5, stream, seq, now_us(), origin)
-                    .encode()
-                    .to_vec();
+            let mut packet = FrameHeader::new(Codec::RawF32, 5, stream, seq, now_us(), origin)
+                .encode()
+                .to_vec();
             for _ in 0..frames * CHANNELS {
                 packet.extend_from_slice(&0.1f32.to_le_bytes());
             }
@@ -1586,9 +1581,8 @@ mod tests {
             }
             packet
         };
-        let mask = (1u64 << (0xAAAu64 % 64))
-            | (1u64 << (0xBBBu64 % 64))
-            | (1u64 << (0xCCCu64 % 64));
+        let mask =
+            (1u64 << (0xAAAu64 % 64)) | (1u64 << (0xBBBu64 % 64)) | (1u64 << (0xCCCu64 % 64));
         let mix_packet = |seq: u32| {
             let mut packet = FrameHeader::new(
                 Codec::RawF32,
@@ -1667,7 +1661,9 @@ mod tests {
         for (needle, expected) in [("aaa", 2), ("ccc", 2), ("bbb#", 2)] {
             let stream = snapshots
                 .iter()
-                .find(|snapshot| snapshot.label.contains(needle) && !snapshot.label.contains("#65520"))
+                .find(|snapshot| {
+                    snapshot.label.contains(needle) && !snapshot.label.contains("#65520")
+                })
                 .expect("normal stream");
             assert_eq!(stream.packets, expected, "{} after release", needle);
         }

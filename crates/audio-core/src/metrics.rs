@@ -156,8 +156,16 @@ impl StreamMetrics {
             origin: self.origin,
             stream_id: self.stream_id,
             label: self.label.clone(),
-            addr: self.addr.lock().map(|addr| addr.clone()).unwrap_or_default(),
-            path: self.path.lock().map(|path| path.clone()).unwrap_or_default(),
+            addr: self
+                .addr
+                .lock()
+                .map(|addr| addr.clone())
+                .unwrap_or_default(),
+            path: self
+                .path
+                .lock()
+                .map(|path| path.clone())
+                .unwrap_or_default(),
             spectrum: self
                 .spectrum
                 .lock()
@@ -174,6 +182,16 @@ impl StreamMetrics {
                 self.buffer_frames.load(Ordering::Relaxed) as usize,
             )),
             target_ms: sanitize(load_f32(&self.target_ms)),
+            // The trim can never fire above what the ring physically holds, so
+            // the reported ceiling is capped there too — otherwise a 500 ms
+            // target would advertise a limit the buffer cannot reach.
+            buffer_max_ms: sanitize(
+                (crate::dsp::resampler::fill_ceiling_ms(load_f32(&self.target_ms)) as f64).min(
+                    crate::format::ms_for_frames(
+                        crate::net::udp::PEER_RING_SAMPLES / crate::format::CHANNELS,
+                    ) as f64,
+                ),
+            ),
             ratio: {
                 let value = load_f32(&self.ratio) as f64;
                 if value.is_finite() {
@@ -231,6 +249,10 @@ pub struct StreamSnapshot {
     pub peak_hold_db: f64,
     pub buffer_ms: f64,
     pub target_ms: f64,
+    /// Overflow-trim ceiling: above this the mixer drops the oldest audio to
+    /// pull latency back to target. Shown next to `buffer_ms` so a panel can
+    /// tell "about to be trimmed" from "starving".
+    pub buffer_max_ms: f64,
     pub ratio: f64,
     pub underruns: u32,
     pub underrun_frames: u32,

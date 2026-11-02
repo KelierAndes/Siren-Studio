@@ -152,6 +152,8 @@ class StreamCard extends StatelessWidget {
                               palette: p,
                               db: channel.rmsDb,
                               accent: channel.accentFor(p),
+                              bufferMs: channel.bufferMs,
+                              bufferMaxMs: channel.bufferMaxMs,
                             );
                             final facts = _Facts(palette: p, channel: channel);
                             if (box.maxWidth >= 190) {
@@ -165,9 +167,9 @@ class StreamCard extends StatelessWidget {
                             }
                             return Column(
                               children: [
-                                SizedBox(height: 104, child: window),
+                                Flexible(child: window),
                                 const SizedBox(height: 8),
-                                Expanded(child: facts),
+                                SizedBox(height: 62, child: facts),
                               ],
                             );
                           },
@@ -192,17 +194,21 @@ class StreamCard extends StatelessWidget {
   };
 }
 
-/// 当前电平窗：数值 + 电平条，占参考图 LCD 小窗的位置。
+/// 当前电平窗：数值 + 电平条 + 缓冲水位，占参考图 LCD 小窗的位置。
 class _LevelWindow extends StatelessWidget {
   const _LevelWindow({
     required this.palette,
     required this.db,
     required this.accent,
+    required this.bufferMs,
+    required this.bufferMaxMs,
   });
 
   final MetalPalette palette;
   final double db;
   final Color accent;
+  final double bufferMs;
+  final double bufferMaxMs;
 
   @override
   Widget build(BuildContext context) {
@@ -212,6 +218,12 @@ class _LevelWindow extends StatelessWidget {
         : norm > .8
         ? palette.orange
         : accent;
+    final fillRatio = bufferMaxMs > 0 ? bufferMs / bufferMaxMs : 0.0;
+    final bufferColor = fillRatio > .9
+        ? palette.salmon
+        : fillRatio > .7
+        ? palette.orange
+        : palette.ink;
     return NeuWell(
       radius: 10,
       palette: palette,
@@ -255,38 +267,85 @@ class _LevelWindow extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 7),
-          SizedBox(
-            height: 5,
-            child: LayoutBuilder(
-              builder: (context, box) => Stack(
-                children: [
-                  Positioned.fill(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: palette.bevel.withValues(alpha: .16),
-                        borderRadius: BorderRadius.circular(3),
-                      ),
-                    ),
+          _LevelBar(norm: norm, barColor: barColor, palette: palette),
+          const SizedBox(height: 5),
+          // 缓冲水位：当前 / 溢出修剪上限。快到上限说明抖动正在被剪掉。
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Row(
+              children: [
+                Text(
+                  '缓冲',
+                  style: NeuType.chrome(9, palette.inkFaint, tracking: .4),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  bufferMaxMs > 0 ? bufferMs.toStringAsFixed(0) : '—',
+                  style: NeuType.numeric(11, bufferColor),
+                ),
+                Text(
+                  bufferMaxMs > 0
+                      ? ' / ${bufferMaxMs.toStringAsFixed(0)} ms'
+                      : '',
+                  style: NeuType.chrome(
+                    9,
+                    palette.inkFaint,
+                    tracking: .3,
                   ),
-                  Positioned(
-                    left: 0,
-                    top: 0,
-                    bottom: 0,
-                    width: box.maxWidth * norm,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [barColor.withValues(alpha: .5), barColor],
-                        ),
-                        borderRadius: BorderRadius.circular(3),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 电平条：5 px 高，跟随当前 dB 归一化宽度。
+class _LevelBar extends StatelessWidget {
+  const _LevelBar({
+    required this.norm,
+    required this.barColor,
+    required this.palette,
+  });
+
+  final double norm;
+  final Color barColor;
+  final MetalPalette palette;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 5,
+      child: LayoutBuilder(
+        builder: (context, box) => Stack(
+          children: [
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: palette.bevel.withValues(alpha: .16),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: box.maxWidth * norm,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [barColor.withValues(alpha: .5), barColor],
+                  ),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

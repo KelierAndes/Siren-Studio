@@ -134,12 +134,18 @@
   .krange { width: 108px; display: flex; justify-content: space-between; margin-top: 2px; font-size: 9.5px; color: var(--muted-2); }
   .klab { margin-top: 4px; font-size: 11px; font-weight: 700; letter-spacing: .16em; color: var(--muted); }
   .dright { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-  .level { padding: 8px 9px; display: flex; flex-direction: column; justify-content: space-between; height: 100px; }
+  .level { padding: 8px 9px; display: flex; flex-direction: column; justify-content: space-between; height: 118px; }
   .level .lk { font-size: 9.5px; letter-spacing: .08em; color: var(--muted-2); }
   .level .lv { font: 600 22px/1 var(--mono); color: var(--accent, var(--blue)); }
   .level .lv i { font-style: normal; font-size: 10px; color: var(--muted); margin-left: 3px; }
   .lbar { height: 5px; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; }
   .lbar i { display: block; height: 100%; width: 0%; border-radius: 3px; background: linear-gradient(90deg, rgba(79,209,197,.5), var(--teal)); }
+  /* 缓冲水位：当前 / 溢出修剪上限，接近上限时变色 */
+  .buf { display: flex; align-items: baseline; gap: 4px; font-size: 9px; letter-spacing: .05em; color: var(--muted-2); }
+  .buf b { font: 600 11px/1 var(--mono); color: var(--text); }
+  .buf b.warm { color: var(--amber); }
+  .buf b.hot { color: var(--red); }
+  .buf i { font-style: normal; font-size: 9px; color: var(--muted-2); }
   .facts { flex: 1; padding: 8px 9px; display: flex; flex-direction: column; justify-content: space-between; }
   .fact { display: flex; align-items: baseline; gap: 6px; font-size: 9.5px; color: var(--muted-2); }
   .fact b { margin-left: auto; font: 500 12px/1.15 var(--mono); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -338,6 +344,21 @@ function dbLabel(db) {
   if (!Number.isFinite(db) || db <= -59.9) return "-60.0";
   return db.toFixed(1);
 }
+/* 缓冲水位：当前 / 溢出修剪上限（2×目标+10 ms）。接近上限说明抖动正被剪掉。 */
+function bufCeiling(stream) {
+  return Number(stream?.buffer_max_ms) || 0;
+}
+function bufLabel(stream) {
+  const max = bufCeiling(stream);
+  if (max <= 0) return "—";
+  return `${Math.round(Number(stream?.buffer_ms) || 0)}<i> / ${Math.round(max)} ms</i>`;
+}
+function bufClass(stream) {
+  const max = bufCeiling(stream);
+  if (max <= 0) return "";
+  const ratio = (Number(stream?.buffer_ms) || 0) / max;
+  return ratio > 0.9 ? "hot" : ratio > 0.7 ? "warm" : "";
+}
 function formatDb(value) {
   const v = Number(value) || 0;
   return (v > 0 ? "+" : "") + v.toFixed(1);
@@ -366,6 +387,10 @@ function streamName(stream, snap) {
 
 function deviceStreams(snap) {
   return (snap?.center?.streams || []).filter((s) => Number(s.stream_id) !== MIX_STREAM_ID);
+}
+/* 卡片要包含 0xFFF0 混音流：它是 N−1 转发的唯一观测点，调试缓冲时必须能看见。 */
+function slotStreams(snap) {
+  return snap?.center?.streams || [];
 }
 
 // 信号质量：丢帧或欠载计数一有增长就记一次事件，1 秒内红、4 秒内黄。
@@ -491,6 +516,7 @@ function slotMarkup(index, stream, snap) {
           <span class="lk">当前电平</span>
           <span class="lv">${dbLabel(stream?.rms_db)}<i>dB</i></span>
           <div class="lbar"><i style="width:${pct(stream?.rms_db)}%"></i></div>
+          <div class="buf">缓冲<b class="${bufClass(stream)}">${bufLabel(stream)}</b></div>
         </div>
         <div class="well facts">
           <div class="fact">路径<b>${stream ? esc(pathLabel(stream.path)) : "—"}</b></div>
@@ -502,7 +528,7 @@ function slotMarkup(index, stream, snap) {
 }
 
 function renderSlots(snap) {
-  const streams = deviceStreams(snap);
+  const streams = slotStreams(snap);
   const pages = Math.max(1, Math.ceil(streams.length / 2));
   if (state.page > pages - 1) state.page = pages - 1;
   for (let i = 0; i < 2; i++) {
@@ -520,6 +546,12 @@ function renderSlots(snap) {
       if (level) level.innerHTML = dbLabel(stream?.rms_db) + "<i>dB</i>";
       const bar = $(".lbar i", slot);
       if (bar) bar.style.width = pct(stream?.rms_db) + "%";
+      const buf = $(".buf b", slot);
+      if (buf) {
+        const html = bufLabel(stream);
+        if (buf.innerHTML !== html) buf.innerHTML = html;
+        buf.className = bufClass(stream);
+      }
       const facts = slot.querySelectorAll(".fact b");
       if (facts.length === 3) {
         facts[0].textContent = stream ? pathLabel(stream.path) : "—";
@@ -641,7 +673,7 @@ function render() {
   trackHealth(snap.center?.streams || []);
 
   pill.className = "statuspill" + (s.running ? " on" : s.starting ? " busy" : "");
-  const pages = Math.max(1, Math.ceil(streams.length / 2));
+  const pages = Math.max(1, Math.ceil(slotStreams(snap).length / 2));
   $("#stateText").textContent = s.running
     ? (pages > 1 ? `组网中 · ${devices} 台　·　${state.page + 1}/${pages}` : `组网中 · ${devices} 台`)
     : s.starting ? "加入中…" : "未组网";
