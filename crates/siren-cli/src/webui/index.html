@@ -310,7 +310,7 @@
 <script>
 const state = {
   status: null,
-  sourceDraft: null,
+  joinDraft: null,
   outputDraft: null,
   page: 0,
   lastInputAt: 0,
@@ -418,17 +418,41 @@ async function poll() {
   render();
 }
 
+/* 未入网时，名称/音源/音调是本地草稿：/api/status 里的 config 是服务端上次
+   入网用的值，每 700 ms 的轮询若直接覆盖表单，用户刚选的音源会被打回上一次
+   的设置（表现就是“音源锁死切不动”）。入网/离开的状态变化时草稿才重建。 */
+function joinForm() {
+  const cfg = (state.status && state.status.config) || {};
+  const live = {
+    name: cfg.name || "Siren Node",
+    source: cfg.source || "loopback",
+    freq: Number(cfg.freq || 440),
+  };
+  if (!state.status || state.status.running || state.status.starting) {
+    state.joinDraft = null;
+    return live;
+  }
+  if (!state.joinDraft) state.joinDraft = live;
+  return state.joinDraft;
+}
+
+function setDraft(patch) {
+  joinForm();
+  Object.assign(state.joinDraft, patch);
+}
+
 function configFromForm() {
   const cfg = state.status?.config || {};
+  const form = joinForm();
   return {
-    name: ($("#name").value || cfg.name || "Siren Node").trim(),
-    source: $("#sourceSeg .active")?.dataset.source || cfg.source || "loopback",
+    name: (form.name || cfg.name || "Siren Node").trim(),
+    source: form.source || cfg.source || "loopback",
     output: state.outputDraft ?? (cfg.output !== false),
     target_ms: Number($("#targetSlider").value) || cfg.target_ms || 30,
     port: cfg.port ?? 47900,
     codec: cfg.codec || "raw",
     frame_ms: cfg.frame_ms ?? 5,
-    freq: Number($("#freq").value) || 440,
+    freq: Number(form.freq) || 440,
     output_sink: cfg.output_sink ?? null,
     peers: cfg.peers || [],
     bt_enabled: cfg.bt_enabled ?? true,
@@ -628,17 +652,20 @@ function render() {
   banner.classList.toggle("show", Boolean(state.error));
   banner.textContent = state.error || "";
 
+  const form = joinForm();
   const nameInput = $("#name");
-  if (document.activeElement !== nameInput) nameInput.value = snap.name || cfg.name || "";
+  if (document.activeElement !== nameInput) {
+    nameInput.value = s.running ? (snap.name || form.name) : form.name;
+  }
   nameInput.disabled = Boolean(s.running);
-  const source = cfg.source || "loopback";
+  const source = form.source;
   document.querySelectorAll("#sourceSeg button").forEach((button) => {
     button.classList.toggle("active", button.dataset.source === source);
     button.disabled = Boolean(s.running);
   });
   $("#localLed").className = "led" + (s.running ? " on" : "");
   $("#localState").textContent = s.starting ? "处理中…" : (s.running ? "已入网" : "未入网");
-  if (document.activeElement !== $("#freq")) $("#freq").value = Number(cfg.freq || 440);
+  if (document.activeElement !== $("#freq")) $("#freq").value = Number(form.freq || 440);
   $("#freqValue").textContent = Math.round(Number($("#freq").value) || 440) + " Hz";
   $("#freq").disabled = Boolean(s.running);
 
@@ -731,13 +758,15 @@ function bindStatic() {
   $("#sourceSeg").addEventListener("click", (event) => {
     const button = event.target.closest("button[data-source]");
     if (!button || button.disabled) return;
-    state.status = state.status || {};
-    state.status.config = state.status.config || {};
-    state.status.config.source = button.dataset.source;
+    setDraft({ source: button.dataset.source });
     render();
+  });
+  $("#name").addEventListener("input", (event) => {
+    setDraft({ name: event.target.value });
   });
   $("#freq").addEventListener("input", (event) => {
     $("#freqValue").textContent = Math.round(Number(event.target.value)) + " Hz";
+    setDraft({ freq: Number(event.target.value) });
   });
 
   $("#join").addEventListener("click", async () => {

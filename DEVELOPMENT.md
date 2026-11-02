@@ -242,6 +242,7 @@ EngineHandle::snapshot() -> (MasterSnapshot, Vec<StreamSnapshot>)
   - 隔离实测（Debian 12 + PipeWire 1.4.2）：节点播放对端 550 Hz 时 `play_sink.monitor` **−15.2 dB**、`siren_capture.monitor` **−180 dB**（数字静音），发送电平 **−120 dB**；第三方 700 Hz 进入默认 `siren_capture` 后发送电平 **−17 dB**；siren 进程 CPU 约 **6%**（monitor + DSP 路径约 31%）。
   - 隔离局限：依赖“默认设备 = 采集 sink”；显式选择设备的应用、WirePlumber 的按应用恢复规则可能绕过；运行期间默认设备会被改写。
   - WebUI 的流 ID 在 JSON 中序列化为**字符串**：流 ID 是 u64，超过 JS `Number.MAX_SAFE_INTEGER` 会被四舍五入，导致按流静音/增益请求打到不存在的 ID（已实测踩中）。页面同时只在结构（流集合/静音状态）变化时重建，其余数值原地更新，避免多网卡 mDNS 端点抖动造成整页重建、点击失效。
+  - WebUI 的**节点名称/音源/音调在未入网时是本地草稿**（`state.joinDraft`）：`/api/status` 里的 `config` 是服务端上次入网用的值，若每 700 ms 的轮询直接覆盖表单，用户刚点选的音源会被打回上一次设置（表现即“音源锁死在系统内录、切到测试音/麦克风无效”）。草稿只在 running/starting 状态变化时重建，`configFromForm()` 与渲染都读草稿；这三项在入网后禁用，改音源需先离开再加入（与桌面端/手机端一致）。
   - 真机验证（192.168.2.196，Debian 12，headless）：WebUI 真实点击“离开/选系统内录/改名/加入”通过；播放对端音乐时本机发送电平 **−51 ～ −71 dBFS**（回声已消除），第三方 `playtone` 700 Hz 穿过为 **−20 dBFS**，无失锁/静音抖动。
   - WebUI 不带鉴权，默认面向可信局域网；需要跨网暴露时请置于反向代理/防火墙之后。
   - **Wi-Fi + 蓝牙双栈自动**：不存在接入方式选择。`HybridNode`（`audio-core::hybrid`）同时运行 Wi-Fi mesh 与蓝牙 overlay：
