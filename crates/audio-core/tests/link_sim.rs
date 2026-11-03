@@ -44,6 +44,12 @@ fn reserve_port() -> u16 {
 /// Start the pair. Both nodes send the default 440 Hz tone; neither touches
 /// an audio device (`output: false` -> `CenterMode::Silent`).
 fn build_pair() -> TestMesh {
+    build_pair_with_codec(SendCodec::Raw)
+}
+
+/// `codec` selects the Wi-Fi payload codec; S16 must deliver loss-free at
+/// roughly half the raw bandwidth (988 B frames fit one MTU).
+fn build_pair_with_codec(codec: SendCodec) -> TestMesh {
     let (rx_port, tx_port, fwd_port, rev_port) = (
         reserve_port(),
         reserve_port(),
@@ -60,7 +66,7 @@ fn build_pair() -> TestMesh {
         mesh_config.advertise = false;
         mesh_config.output = false;
         mesh_config.source = SendSource::Tone;
-        mesh_config.codec = SendCodec::Raw;
+        mesh_config.codec = codec;
         mesh_config.frame_ms = 5;
         // node ids must be >=16 hex chars to be accepted (otherwise both
         // nodes fall back to the same machine-persisted id and collide).
@@ -346,4 +352,34 @@ fn partition_and_recovery() {
         lost_for_cut >= 300.0,
         "the receiver should account the cut span as loss: lost_for_cut={lost_for_cut:.1}"
     );
+}
+
+/// Scenario 7 — s16 payload (F1): same 5 ms timeline at half the wire size;
+/// the stream is loss-free and the sender's bandwidth matches ~988 B frames
+/// (988 x 200 pps x 8 bit = ~1580 kbps) instead of raw's ~3100 kbps.
+#[test]
+fn s16_payload_halves_bandwidth_and_delivers() {
+    let mesh = build_pair_with_codec(SendCodec::S16);
+    wait_secs(2);
+
+    let kbps = mesh.sender.snapshot().sender.kbps;
+    assert!(
+        (1200.0..2000.0).contains(&kbps),
+        "s16 should send ~1580 kbps, got {kbps}"
+    );
+
+    let stream = rx_stream(&mesh).expect("s16 stream visible at receiver");
+    assert!(
+        stream.packets >= 300,
+        "expected ~400 packets in 2 s, got {}",
+        stream.packets
+    );
+    let lost = lost_packets(&stream);
+    let loss_ratio = lost / (stream.packets as f64 + lost).max(1.0);
+    assert!(
+        loss_ratio < 0.02 && stream.codec == "s16",
+        "s16 stream should be loss-free: codec={} lost={lost:.1} ratio={loss_ratio:.3}",
+        stream.codec
+    );
+    assert!(stream.active);
 }

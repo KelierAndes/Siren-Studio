@@ -110,6 +110,7 @@ impl UiConfig {
         match self.codec.as_str() {
             "raw" => Some(SendCodec::Raw),
             "opus" => Some(SendCodec::Opus),
+            "s16" => Some(SendCodec::S16),
             _ => None,
         }
     }

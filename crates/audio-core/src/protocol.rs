@@ -59,6 +59,9 @@ pub enum ProtocolError {
 pub enum Codec {
     RawF32 = 0,
     Opus = 1,
+    /// Little-endian interleaved s16. Same timeline as RawF32 but half the
+    /// wire size (5 ms frame = 988 B, fits one MTU) — no IP fragmentation.
+    RawS16 = 2,
 }
 
 impl Codec {
@@ -66,6 +69,7 @@ impl Codec {
         match id {
             0 => Ok(Codec::RawF32),
             1 => Ok(Codec::Opus),
+            2 => Ok(Codec::RawS16),
             other => Err(ProtocolError::BadCodec(other)),
         }
     }
@@ -74,6 +78,7 @@ impl Codec {
         match self {
             Codec::RawF32 => "raw",
             Codec::Opus => "opus",
+            Codec::RawS16 => "s16",
         }
     }
 }

@@ -48,6 +48,7 @@ pub fn run(args: SendArgs) -> Result<()> {
     let codec = match args.codec.to_ascii_lowercase().as_str() {
         "raw" | "pcm" | "f32" => Codec::RawF32,
         "opus" => Codec::Opus,
+        "s16" => Codec::RawS16,
         other => return Err(anyhow!("unknown codec '{other}' (use raw or opus)")),
     };
     let frame_ms = args.frame_ms;

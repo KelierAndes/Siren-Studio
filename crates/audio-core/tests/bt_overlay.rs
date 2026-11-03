@@ -270,10 +270,11 @@ fn audio_survives_wifi_cut_on_bt_carrier() {
     );
     let before = stream_from(&mesh).expect("stream present");
 
-    // Cut Wi-Fi both ways; the simulated RFCOMM link stays up.
+    // Cut Wi-Fi both ways (2 s, inside the 3 s LAN stream timeout); the
+    // simulated RFCOMM link stays up.
     mesh.forward.cut();
     mesh.reverse.cut();
-    std::thread::sleep(Duration::from_secs(3));
+    std::thread::sleep(Duration::from_secs(2));
 
     // Per the N-1 design the hub stops relaying individual streams once the
     // leaf is Bluetooth-only: the audio continues through the *mix* stream
@@ -298,5 +299,16 @@ fn audio_survives_wifi_cut_on_bt_carrier() {
         after.packets - during.packets >= 200,
         "direct stream should resume after Wi-Fi returns: delta={}",
         after.packets - during.packets
+    );
+
+    // F3: the mix must yield once direct Wi-Fi is back — the listener hears
+    // either the direct stream or the mix, never both at once.
+    let mix_after_restore = mix_stream_packets(&mesh);
+    std::thread::sleep(Duration::from_secs(2));
+    let mix_settled = mix_stream_packets(&mesh);
+    assert!(
+        mix_settled - mix_after_restore <= 10,
+        "mix should stop once direct Wi-Fi is healthy again: delta={} (arbitration must not double-play)",
+        mix_settled - mix_after_restore
     );
 }

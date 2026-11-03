@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use rtrb::{Consumer, Producer};
 
 use crate::dsp::resampler::DriftResampler;
-use crate::format::CHANNELS;
+use crate::format::{CHANNELS, SAMPLE_RATE};
 use crate::metrics::{db_to_linear, store_f32, MixerMetrics, StreamMetrics};
 
 pub enum MixerCommand {
@@ -89,10 +89,115 @@ impl StreamChannel {
     }
 }
 
+/// Feed-forward soft-knee limiter with 1 ms lookahead (F4). The old bare
+/// `tanh` compressed the whole bus from ~half scale up, dulling normal
+/// multi-source mixes; this stays linear below the knee and only pulls gain
+/// down on detected overs, acting 1 ms early so the attack is click-free.
+struct Limiter {
+    /// Pre-gain frames, `LOOKAHEAD_FRAMES` behind the envelope head.
+    delay: Vec<f32>,
+    pos: usize,
+    /// |x| per delayed frame, for the running max over the lookahead window.
+    env_ring: Vec<f32>,
+    gain: f32,
+    primed: usize,
+}
+
+const LOOKAHEAD_FRAMES: usize = 48; // 1 ms
+/// Gain starts pulling below this envelope (soft knee begins).
+const KNEE: f32 = 0.9;
+/// Full release from a limited gain back to unity, in frames.
+const RELEASE_FRAMES: f32 = SAMPLE_RATE as f32 * 0.05; // 50 ms
+
+impl Limiter {
+    fn new() -> Self {
+        Self {
+            delay: vec![0.0; LOOKAHEAD_FRAMES * CHANNELS],
+            pos: 0,
+            env_ring: vec![0.0; LOOKAHEAD_FRAMES],
+            gain: 1.0,
+            primed: 0,
+        }
+    }
+
+    /// Soft-knee curve: unity below the knee, quadratically easing into the
+    /// hard ratio `KNEE/env` at 2x the knee.
+    fn knee_gain(env: f32) -> f32 {
+        if env <= KNEE {
+            1.0
+        } else {
+            let x = ((env - KNEE) / KNEE).min(1.0);
+            let hard = KNEE / env;
+            1.0 - (1.0 - hard) * x * x
+        }
+    }
+
+    /// Apply to one block of interleaved stereo (pre-gain samples already
+    /// multiplied by master gain). Replaces the samples in place.
+    fn process(&mut self, out: &mut [f32], clipped: &mut u64) {
+        let frames = out.len() / CHANNELS;
+        let release_step = 1.0 / RELEASE_FRAMES;
+        // A fully silent block means nothing is playing: mute must cut
+        // immediately, so flush the lookahead tail instead of emitting it.
+        if out.iter().all(|s| s.abs() < 1e-9) {
+            self.delay.fill(0.0);
+            self.env_ring.fill(0.0);
+            self.primed = 0;
+            return;
+        }
+        for frame in 0..frames {
+            let slice = &out[frame * CHANNELS..(frame + 1) * CHANNELS];
+            let mut absmax = 0.0f32;
+            let mut over = false;
+            for sample in slice {
+                let value = *sample;
+                absmax = absmax.max(value.abs());
+                if value.abs() > 1.0 {
+                    over = true;
+                }
+            }
+            if over {
+                *clipped += CHANNELS as u64;
+            }
+            // Delay the pre-gain signal and track its envelope.
+            self.delay[self.pos * CHANNELS..(self.pos + 1) * CHANNELS].copy_from_slice(slice);
+            self.env_ring[self.pos] = absmax;
+            self.pos = (self.pos + 1) % LOOKAHEAD_FRAMES;
+            self.primed = (self.primed + 1).min(LOOKAHEAD_FRAMES);
+            if self.primed < LOOKAHEAD_FRAMES {
+                // First 1 ms: the lookahead ring is priming, so there is no
+                // delayed frame to emit — output silence rather than an
+                // unprocessed frame.
+                for sample in out[frame * CHANNELS..(frame + 1) * CHANNELS].iter_mut() {
+                    *sample = 0.0;
+                }
+                continue;
+            }
+
+            // Envelope for the frame leaving the delay = max over the whole
+            // lookahead window.
+            let env = self.env_ring.iter().copied().fold(0.0f32, f32::max);
+            let desired = Self::knee_gain(env);
+            if desired < self.gain {
+                self.gain = desired; // instant attack: the lookahead bought us time
+            } else {
+                self.gain = (self.gain + release_step).min(desired);
+            }
+
+            let out_frame = &mut out[frame * CHANNELS..(frame + 1) * CHANNELS];
+            let delayed = &self.delay[self.pos * CHANNELS..(self.pos + 1) * CHANNELS];
+            for (sample, input) in out_frame.iter_mut().zip(delayed) {
+                *sample = (*input * self.gain).clamp(-1.0, 1.0);
+            }
+        }
+    }
+}
+
 pub struct Mixer {
     slots: Vec<Option<Box<StreamChannel>>>,
     cmd_rx: Consumer<MixerCommand>,
     master_gain: f32,
+    limiter: Limiter,
     /// Last target set by the UI. Streams that join later must use it too,
     /// otherwise a target chosen before any peer connected silently reverts
     /// to the startup value and network jitter becomes underruns.
@@ -114,6 +219,7 @@ pub fn new_mixer(max_streams: usize) -> (Mixer, MixerHandle) {
         slots: (0..max_streams).map(|_| None).collect(),
         cmd_rx,
         master_gain: 1.0,
+        limiter: Limiter::new(),
         target_override: None,
         metrics: metrics.clone(),
     };
@@ -268,19 +374,16 @@ impl Mixer {
             }
         }
 
+        for sample in out.iter_mut() {
+            *sample *= self.master_gain;
+        }
         let mut peak = 0.0f32;
         let mut sumsq = 0.0f64;
         let mut clipped = 0u64;
-        for sample in out.iter_mut() {
-            let pre = *sample * self.master_gain;
-            if pre.abs() > 1.0 {
-                clipped += 1;
-            }
-            // Soft limiter: tanh keeps overs above 1.0 from hard-clipping.
-            let post = pre.tanh();
-            *sample = post;
-            peak = peak.max(post.abs());
-            sumsq += (post as f64) * (post as f64);
+        self.limiter.process(out, &mut clipped);
+        for sample in out.iter() {
+            peak = peak.max(sample.abs());
+            sumsq += (*sample as f64) * (*sample as f64);
         }
 
         let samples = out.len().max(1) as f64;
@@ -456,5 +559,43 @@ mod tests {
         assert!(out.iter().all(|s| s.abs() < 1e-6));
         assert!(load_f32(&metrics.rms) < 1e-6);
         assert!(producer.slots() > 0, "muted stream must still be drained");
+    }
+
+    #[test]
+    fn limiter_stays_linear_below_the_knee() {
+        // F4: a -6 dBFS peak must pass through untouched — the old tanh
+        // compressed it to tanh(0.5)=0.462 (-5.7 dBFS heard as -6.7).
+        let (mut mixer, mut handle) = new_mixer(4);
+        let (mut producer, consumer) = rtrb::RingBuffer::new(96_000);
+        let metrics = Arc::new(StreamMetrics::new(
+            1,
+            0x1234,
+            7,
+            "test".into(),
+            "127.0.0.1:1".into(),
+            Codec::RawF32,
+            20.0,
+        ));
+        metrics.set_gain_db(6.0); // 0.25 tone -> 0.5 peak, below the 0.9 knee
+        assert!(handle.add(StreamChannel::new(metrics.clone(), consumer, 20.0)));
+
+        let mut tone = Tone::new(1000.0);
+        let mut feed = vec![0.0f32; 240 * CHANNELS];
+        let mut out = vec![0.0f32; 240 * CHANNELS];
+        let mut peak = 0.0f32;
+        for _ in 0..50 {
+            tone.fill(&mut feed);
+            let _ = producer.push_partial_slice(&feed);
+            mixer.render(&mut out);
+            if handle.metrics().snapshot().frames_rendered > 2 * 240 {
+                for sample in &out {
+                    peak = peak.max(sample.abs());
+                }
+            }
+        }
+        assert!(
+            peak > 0.47 && peak <= 0.51,
+            "below-knee signal must stay linear (tanh would give ~0.462): {peak}"
+        );
     }
 }

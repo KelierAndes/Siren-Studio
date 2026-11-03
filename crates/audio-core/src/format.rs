@@ -41,6 +41,28 @@ pub fn bytes_to_pcm(bytes: &[u8], out: &mut Vec<f32>) {
     }
 }
 
+/// Convert interleaved f32 PCM to little-endian s16 (half the wire size of
+/// f32; one 5 ms frame fits a single MTU).
+pub const S16_BYTES: usize = 2;
+
+pub fn pcm_to_s16_bytes(pcm: &[f32], out: &mut Vec<u8>) {
+    out.clear();
+    out.reserve(pcm.len() * S16_BYTES);
+    for &sample in pcm {
+        let value = (sample.clamp(-1.0, 1.0) * 32767.0) as i16;
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+}
+
+/// Convert little-endian s16 bytes to interleaved PCM, appending to `out`.
+pub fn s16_bytes_to_pcm(bytes: &[u8], out: &mut Vec<f32>) {
+    out.clear();
+    out.reserve(bytes.len() / S16_BYTES);
+    for chunk in bytes.chunks_exact(S16_BYTES) {
+        out.push(i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / 32768.0);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

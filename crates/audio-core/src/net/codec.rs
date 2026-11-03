@@ -5,7 +5,7 @@
 
 use opus_head_sys as ffi;
 
-use crate::format::{bytes_to_pcm, pcm_to_bytes, CHANNELS, SAMPLE_RATE};
+use crate::format::{bytes_to_pcm, pcm_to_bytes, s16_bytes_to_pcm, pcm_to_s16_bytes, CHANNELS, SAMPLE_RATE};
 use crate::protocol::Codec;
 use crate::{CoreError, Result};
 
@@ -36,7 +36,7 @@ impl AudioEncoder {
     /// low rate so a narrow RFCOMM link can carry every frame.
     pub fn with_bitrate(codec: Codec, bitrate: Option<i32>) -> Result<Self> {
         let opus = match codec {
-            Codec::RawF32 => None,
+            Codec::RawF32 | Codec::RawS16 => None,
             Codec::Opus => Some(OpusEncoder::new(bitrate)?),
         };
         Ok(Self { codec, opus })
@@ -47,6 +47,10 @@ impl AudioEncoder {
         match self.codec {
             Codec::RawF32 => {
                 pcm_to_bytes(pcm, out);
+                Ok(out.len())
+            }
+            Codec::RawS16 => {
+                pcm_to_s16_bytes(pcm, out);
                 Ok(out.len())
             }
             Codec::Opus => {
@@ -69,7 +73,7 @@ pub struct AudioDecoder {
 impl AudioDecoder {
     pub fn new(codec: Codec) -> Result<Self> {
         let opus = match codec {
-            Codec::RawF32 => None,
+            Codec::RawF32 | Codec::RawS16 => None,
             Codec::Opus => Some(OpusDecoder::new()?),
         };
         Ok(Self {
@@ -90,6 +94,16 @@ impl AudioDecoder {
                     )));
                 }
                 bytes_to_pcm(payload, &mut self.buf);
+                Ok(&self.buf)
+            }
+            Codec::RawS16 => {
+                if payload.len() % (CHANNELS * 2) != 0 {
+                    return Err(CoreError::Codec(format!(
+                        "s16 payload is not a whole stereo frame: {} bytes",
+                        payload.len()
+                    )));
+                }
+                s16_bytes_to_pcm(payload, &mut self.buf);
                 Ok(&self.buf)
             }
             Codec::Opus => {

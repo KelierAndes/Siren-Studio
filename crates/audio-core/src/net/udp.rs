@@ -408,6 +408,30 @@ impl PathHealth {
     }
 }
 
+/// Fade-in length after any discontinuity (startup, gap resume, zero-fill
+/// resume, carrier-switch flush): a 0->signal hard cut is what the listener
+/// hears as a click, so every resume ramps up over 3 ms instead (F2).
+pub const RAMP_FRAMES: usize = 240; // 3 ms at 48 kHz
+
+/// Linear fade-in over the first `ramp` frames, in place. Returns how many
+/// frames of ramp are left after this buffer (0 when the ramp finished).
+pub fn apply_fade_in(samples: &mut [f32], ramp_left: usize) -> usize {
+    let frames = samples.len() / CHANNELS;
+    if frames == 0 || ramp_left == 0 {
+        return ramp_left;
+    }
+    // The ramp always spans RAMP_FRAMES total; `ramp_left` is what is still
+    // owed, so the gain continues where the previous buffer left off.
+    let span = ramp_left.min(frames);
+    for i in 0..span {
+        let gain = (((RAMP_FRAMES - ramp_left) + i + 1) as f32 / RAMP_FRAMES as f32).min(1.0);
+        for ch in 0..CHANNELS {
+            samples[i * CHANNELS + ch] *= gain;
+        }
+    }
+    ramp_left.saturating_sub(span)
+}
+
 /// A sample-to-sample jump larger than this is counted as a click. A full
 /// scale sine at 20 kHz only moves ~0.13 per sample, so legitimate program
 /// material rarely trips it; hard discontinuities reach 1.0+.
@@ -635,7 +659,7 @@ struct Peer {
     /// Dual-stack delivers the same frame encoded differently per carrier
     /// (raw over Wi-Fi, Opus over Bluetooth); keep one decoder per codec and
     /// pick per packet. The sequence timeline is shared by both carriers.
-    decoders: [Option<AudioDecoder>; 2],
+    decoders: [Option<AudioDecoder>; 3],
     last_seq: Option<u32>,
     last_seen: Instant,
     metrics: Arc<StreamMetrics>,
@@ -659,6 +683,8 @@ struct Peer {
     /// Last sample per channel from the previous delivery; the click
     /// detector diffs against it across packet boundaries.
     last_sample: Option<Vec<f32>>,
+    /// Frames of fade-in still owed after a discontinuity (F2).
+    ramp_remaining: usize,
     /// Rate limit for the "seq gap" evidence line: a lifetime cap hides the
     /// very stalls the switch measurement is supposed to explain.
     last_gap_log: Instant,
@@ -694,7 +720,7 @@ struct SwitchTrace {
 impl Peer {
     fn decoder(&mut self, codec: Codec) -> Result<&mut AudioDecoder> {
         let index = codec as usize;
-        if index >= 2 {
+        if index >= self.decoders.len() {
             return Err(CoreError::Codec("unknown codec".into()));
         }
         if self.decoders[index].is_none() {
@@ -712,7 +738,7 @@ impl Peer {
     ) -> Result<usize> {
         // The decoder returns a slice into its own buffer, so copy it out
         // before touching the ring producer again.
-        let samples: Vec<f32> = {
+        let mut samples: Vec<f32> = {
             let decoder = self.decoder(codec)?;
             decoder.decode(payload)?.to_vec()
         };
@@ -738,6 +764,9 @@ impl Peer {
             );
         }
         let frames = samples.len() / CHANNELS;
+        if self.ramp_remaining > 0 {
+            self.ramp_remaining = apply_fade_in(&mut samples, self.ramp_remaining);
+        }
         let (_, rest) = self.producer.push_partial_slice(&samples);
         if !rest.is_empty() {
             self.metrics
@@ -1029,6 +1058,7 @@ fn run(
                         );
                         mixer.flush_stream(peer.id);
                         peer.last_seq = None;
+                        peer.ramp_remaining = RAMP_FRAMES;
                         peer.switch = Some(SwitchTrace {
                             from: if peer.last_path_bt { "bt" } else { "wifi" },
                             to: if is_bt { "bt" } else { "wifi" },
@@ -1082,6 +1112,9 @@ fn run(
                             synth_ms,
                         });
                     }
+                    // The listener hears 0 -> signal right after this gap;
+                    // ramp the resume instead (F2).
+                    peer.ramp_remaining = RAMP_FRAMES;
                     if header.codec == Codec::Opus {
                         let concealed = peer.conceal(gap.min(MAX_PLC_PACKETS), frame_frames);
                         peer.metrics
@@ -1377,7 +1410,7 @@ fn create_peer(
     // (Opus) and later receive Wi-Fi copies (raw). Putting the first decoder
     // in slot 0 regardless of its codec made every later raw packet decode
     // with the Opus decoder and fail.
-    let mut decoders: [Option<AudioDecoder>; 2] = [None, None];
+    let mut decoders: [Option<AudioDecoder>; 3] = [None, None, None];
     decoders[header.codec as usize] = Some(AudioDecoder::new(header.codec)?);
     Ok(Peer {
         id,
@@ -1388,6 +1421,7 @@ fn create_peer(
         last_seq: None,
         last_seen: Instant::now(),
         last_sample: None,
+        ramp_remaining: RAMP_FRAMES,
         metrics,
         zero_buf: vec![0.0; frames_for_ms(MAX_GAP_FILL_MS) * CHANNELS],
         bt_streak: if bt_carrier { 1 } else { 0 },
@@ -1954,5 +1988,23 @@ mod tests {
         let clicks = peer.metrics.clicks.load(Ordering::Relaxed);
         assert!(clicks >= 1, "hard cut should count as a click: {clicks}");
         let _ = mixer;
+    }
+
+    #[test]
+    fn fade_in_ramps_the_head_without_touching_the_tail() {
+        // 480 stereo frames: first 240 (RAMP_FRAMES) ramp 1/240..1.0.
+        let mut samples: Vec<f32> = vec![1.0; 480 * CHANNELS];
+        let left = apply_fade_in(&mut samples, RAMP_FRAMES);
+        assert_eq!(left, 0, "3 ms ramp fits in a 10 ms buffer");
+        // First sample barely rises, ramp end reaches full scale.
+        let first = samples[0];
+        assert!(first > 0.0 && first < 0.02, "first sample ~1/240: {first}");
+        assert!((samples[(RAMP_FRAMES - 1) * CHANNELS] - 1.0).abs() < 1e-3);
+        assert_eq!(samples[RAMP_FRAMES * CHANNELS], 1.0, "tail untouched");
+        // Short buffer: ramp spills over, returned remainder > 0.
+        let mut short = vec![1.0f32; 100 * CHANNELS];
+        let left = apply_fade_in(&mut short, RAMP_FRAMES);
+        assert_eq!(left, RAMP_FRAMES - 100);
+        assert!((short[(100 - 1) * CHANNELS] - 100.0 / 240.0).abs() < 1e-3);
     }
 }

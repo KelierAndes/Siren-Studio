@@ -152,6 +152,7 @@ def run_one(
     pc_port: int,
     nas_port: int,
     nas_ip: str,
+    codec: str,
 ) -> list[dict]:
     OUT.mkdir(parents=True, exist_ok=True)
     pc_stats = OUT / f"{scenario}_{run:02d}_pc.jsonl"
@@ -174,7 +175,7 @@ def run_one(
             hostkey,
             f"rm -f {nas_stats_remote}; setsid nohup {LINUX_BIN} --log warn mesh "
             f"--no-discover --port {nas_port} --peer {pc_ip}:{pc_port} "
-            f"--name nas-hub --duration {total} "
+            f"--name nas-hub --codec {codec} --duration {total} "
             f"--stats-json {nas_stats_remote} --stats-interval 1 "
             f">/dev/null 2>&1 &",
             timeout=20,
@@ -187,7 +188,7 @@ def run_one(
                 "--log", "warn", "mesh",
                 "--no-discover", "--port", str(pc_port),
                 "--peer", f"{nas_ip}:{nas_port}",
-                "--name", "pc-leaf", "--duration", str(total),
+                "--name", "pc-leaf", "--codec", codec, "--duration", str(total),
                 "--stats-json", str(pc_stats), "--stats-interval", "1",
             ],
             stdout=pc_log,
@@ -259,6 +260,8 @@ def main() -> int:
     parser.add_argument("--scenarios", default=",".join(SCENARIOS))
     parser.add_argument("--pc-port", type=int, default=47910)
     parser.add_argument("--nas-port", type=int, default=47901)
+    parser.add_argument("--codec", default="raw", choices=["raw", "s16", "opus"],
+                        help="Wi-Fi payload codec for both nodes (F1 comparison)")
     args = parser.parse_args()
 
     scenarios = [s.strip() for s in args.scenarios.split(",") if s.strip()]
@@ -286,7 +289,7 @@ def main() -> int:
             print(f"[{time.strftime('%H:%M:%S')}] {scenario} run {run}/{args.runs} ...", flush=True)
             try:
                 rows = run_one(scenario, run, args.seconds, args.host, args.password,
-                               args.hostkey, args.pc_port, args.nas_port, nas_ip)
+                               args.hostkey, args.pc_port, args.nas_port, nas_ip, args.codec)
             except Exception as error:  # keep the matrix going, record the failure
                 rows = [{"scenario": scenario, "run": run, "direction": "?", "error": str(error)}]
             all_rows.extend(rows)

@@ -579,6 +579,8 @@ pub enum SendSource {
 pub enum SendCodec {
     Raw,
     Opus,
+    /// s16 payload: same 5 ms timeline, half the bytes, no IP fragmentation.
+    S16,
 }
 
 impl SendCodec {
@@ -586,6 +588,7 @@ impl SendCodec {
         match self {
             SendCodec::Raw => Codec::RawF32.as_str(),
             SendCodec::Opus => Codec::Opus.as_str(),
+            SendCodec::S16 => Codec::RawS16.as_str(),
         }
     }
 
@@ -593,6 +596,7 @@ impl SendCodec {
         match self {
             SendCodec::Raw => Codec::RawF32,
             SendCodec::Opus => Codec::Opus,
+            SendCodec::S16 => Codec::RawS16,
         }
     }
 }

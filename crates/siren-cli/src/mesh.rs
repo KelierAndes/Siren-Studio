@@ -96,6 +96,7 @@ pub fn run(args: MeshArgs) -> Result<()> {
     let codec = match args.codec.to_ascii_lowercase().as_str() {
         "raw" | "pcm" | "f32" => SendCodec::Raw,
         "opus" => SendCodec::Opus,
+        "s16" => SendCodec::S16,
         other => return Err(anyhow!("unknown codec '{other}' (use raw or opus)")),
     };
 
