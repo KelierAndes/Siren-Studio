@@ -23,6 +23,11 @@ pub fn samples_for_frames(frames: usize) -> usize {
     frames * CHANNELS
 }
 
+/// Fade-in length after any discontinuity (startup, gap resume, trim,
+/// carrier-switch flush): a 0->signal hard cut is what the listener hears as
+/// a click, so every resume ramps up over 3 ms instead (F2).
+pub const RAMP_FRAMES: usize = 240; // 3 ms at 48 kHz
+
 /// Convert interleaved f32 PCM to little-endian bytes.
 pub fn pcm_to_bytes(pcm: &[f32], out: &mut Vec<u8>) {
     out.clear();

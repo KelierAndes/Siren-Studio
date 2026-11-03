@@ -63,6 +63,8 @@ pub struct DriftResampler {
     buf: Vec<f32>,
     len_frames: usize,
     started: bool,
+    /// Frames of output fade-in still owed after a trim (MIX1/F8).
+    ramp_left: usize,
 }
 
 impl DriftResampler {
@@ -81,6 +83,7 @@ impl DriftResampler {
             buf: vec![0.0; MAX_BUFFER_FRAMES * CHANNELS],
             len_frames: 0,
             started: false,
+            ramp_left: 0,
         }
     }
 
@@ -147,13 +150,17 @@ impl DriftResampler {
                 }
                 to_drop -= got;
             }
-            self.started = false;
+            // MIX1 (#64): the old path set started=false, which re-warmed the
+            // stream (silence until the water level refilled) and fed the
+            // trim<->underrun oscillation. Stay started: the buffer is at
+            // target, the PI state is reset, and the resume is faded in.
             self.integral = 0.0;
             self.fill_ema = self.target_frames;
+            self.ramp_left = crate::format::RAMP_FRAMES;
             return RenderReport {
                 fill_frames: (self.len_frames + rx.slots() / CHANNELS) as u32,
                 ratio: 1.0,
-                started: false,
+                started: true,
                 buffer_reset: true,
                 ..Default::default()
             };
@@ -219,10 +226,20 @@ impl DriftResampler {
                     let y1 = self.buf[base];
                     let y2 = self.buf[base + CHANNELS];
                     let y3 = self.buf[base + 2 * CHANNELS];
-                    let sample = hermite(y0, y1, y2, y3, frac) * gain;
+                    let mut sample = hermite(y0, y1, y2, y3, frac) * gain;
+                    if self.ramp_left > 0 {
+                        // MIX1/F8: fade the stream back in after a trim.
+                        let done = (crate::format::RAMP_FRAMES - self.ramp_left) as f32;
+                        sample *= ((done + i as f32 + 1.0)
+                            / crate::format::RAMP_FRAMES as f32)
+                            .min(1.0);
+                    }
                     peak = peak.max(sample.abs());
                     sumsq += (sample as f64) * (sample as f64);
                     out[i * CHANNELS + ch] += sample;
+                }
+                if self.ramp_left > 0 {
+                    self.ramp_left = self.ramp_left.saturating_sub(1);
                 }
                 self.pos += self.ratio;
             } else {
@@ -428,13 +445,16 @@ mod tests {
         producer.push_entire_slice(&flood).unwrap();
         let report = resampler.render(&mut consumer, 240, 1.0, &mut out);
         assert!(report.buffer_reset);
-        assert!(!report.started);
+        // MIX1/F8: the trim must not re-warm the stream (that silence fed
+        // the trim<->underrun oscillation); it stays started at target fill.
+        assert!(report.started);
         assert!(
             report.fill_frames <= frames_for_ms(40.0) as u32,
             "fill after reset {} frames",
             report.fill_frames
         );
 
+        // The very next block renders audio again (faded in), no warm-up gap.
         let report = resampler.render(&mut consumer, 240, 1.0, &mut out);
         assert!(report.started);
         assert!(report.peak > 0.05);

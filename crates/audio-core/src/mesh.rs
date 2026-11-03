@@ -245,6 +245,8 @@ struct MeshShared {
     bt: Mutex<BtStatus>,
     /// Per-endpoint heartbeat health measured by the sender thread.
     health: Mutex<HashMap<String, crate::net::udp::PathHealth>>,
+    /// F7: warned about a duplicate uid this session.
+    clone_warned: Mutex<bool>,
     /// Latest decoded audio per origin; the hub builds N-1 mixes from it.
     mix_tap: Arc<crate::net::udp::MixTap>,
     /// Set when this node currently acts as the Bluetooth hub.
@@ -265,6 +267,20 @@ fn random_node_id() -> String {
 /// Where this machine keeps its node identity. Deliberately not next to
 /// `hub.json` on Linux: that one lives in `$XDG_RUNTIME_DIR` and vanishes on
 /// reboot, while the identity has to outlive both.
+/// F7: a cloned machine image produces two nodes with the same identity.
+/// The running engine cannot change its uid safely, but persisting a fresh
+/// id means the next start stops colliding. Called once per session when the
+/// receiver sees our own uid coming from the network.
+fn regenerate_node_id() {
+    let Some(path) = node_id_path() else { return };
+    let id = random_node_id();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&path, &id);
+    log::warn!("mesh: duplicate uid detected on the network; regenerated node id for the next start");
+}
+
 fn node_id_path() -> Option<std::path::PathBuf> {
     #[cfg(windows)]
     {
@@ -369,6 +385,7 @@ impl MeshEngine {
             tx_rms_db: AtomicU32::new(0),
             peers: Mutex::new(Vec::new()),
             health: Mutex::new(HashMap::new()),
+            clone_warned: Mutex::new(false),
             topology: Arc::new(Mutex::new(Vec::new())),
             tunnel: Mutex::new(None),
             bt: Mutex::new(BtStatus {
@@ -866,13 +883,36 @@ fn run_mesh_sender(
                 }
             }
         }
+        // F7: if the receiver decoded audio carrying OUR uid, a cloned
+        // image is on the network. Persist a regenerated id for the next
+        // start (the running engine cannot change its uid safely).
+        if hb_counter % (crate::net::udp::HB_TICKS as u32 * 10) == 0 {
+            let clones = shared.mix_tap.snapshot(mix_samples, 0, Duration::from_secs(5));
+            if clones.iter().any(|(other, _, _)| *other == origin)
+                && !*shared.clone_warned.lock().unwrap()
+            {
+                *shared.clone_warned.lock().unwrap() = true;
+                log::warn!(
+                    "mesh: our own uid {:016x} arrived from the network — cloned node image (F7)",
+                    origin
+                );
+                regenerate_node_id();
+            }
+        }
         // Heartbeat (F10): request every 500 ms, drain echoes every tick,
         // and publish the rolling path health for the snapshot/UI.
         hb_counter += 1;
+        let refresh_routes = hb_counter % (crate::net::udp::HB_TICKS as u32 * 60) == 0;
         for (endpoint, sender) in senders.iter_mut() {
             sender.poll_heartbeat();
             if hb_counter % (crate::net::udp::HB_TICKS as u32) == 0 {
                 sender.send_heartbeat();
+            }
+            if refresh_routes {
+                // F13: Wi-Fi off->on leaves the connected socket pinned to
+                // the old route; re-pin periodically so audio returns to
+                // Wi-Fi without waiting for the user to restart.
+                sender.refresh_route();
             }
             let health = sender.path_health();
             shared

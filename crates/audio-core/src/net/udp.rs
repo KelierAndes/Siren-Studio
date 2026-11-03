@@ -25,6 +25,9 @@ use crate::{CoreError, Result};
 pub(crate) const PEER_RING_SAMPLES: usize = SAMPLE_RATE as usize * CHANNELS; // one second
 const MAX_PLC_PACKETS: u32 = 6;
 const MAX_GAP_FILL_MS: f32 = 100.0;
+/// Frozen streams (timed out but kept for a fast resume) are evicted after
+/// this much total silence.
+const FREEZE_GRACE: Duration = Duration::from_secs(30);
 const PEER_TIMEOUT: Duration = Duration::from_secs(3);
 const BT_PEER_TIMEOUT: Duration = Duration::from_secs(8);
 /// RFCOMM has bursts and long stalls; a Bluetooth-only stream gets a wider
@@ -283,6 +286,19 @@ impl UdpSender {
     }
 
     /// Current rolling health of this path (zeros until samples exist).
+    /// Re-pin the connected socket's route (F13): a connected UDP socket
+    /// caches the route chosen at connect time, so after Wi-Fi returns the
+    /// sender kept riding the old interface and the audio stayed on
+    /// Bluetooth. Re-connecting re-resolves source/route without touching
+    /// the packer (stream id and sequence must not change).
+    pub fn refresh_route(&mut self) {
+        if self.socket.connect(self.target).is_err() {
+            // Network momentarily unreachable (e.g. Wi-Fi mid-toggle); the
+            // next tick's refresh retries.
+            self.fail_streak += 1;
+        }
+    }
+
     pub fn path_health(&self) -> PathHealth {
         let window: Vec<u64> = self.hb_window.iter().copied().collect();
         PathHealth::from_window(&window, self.hb_sent, self.hb_lost)
@@ -408,11 +424,6 @@ impl PathHealth {
     }
 }
 
-/// Fade-in length after any discontinuity (startup, gap resume, zero-fill
-/// resume, carrier-switch flush): a 0->signal hard cut is what the listener
-/// hears as a click, so every resume ramps up over 3 ms instead (F2).
-pub const RAMP_FRAMES: usize = 240; // 3 ms at 48 kHz
-
 /// Linear fade-in over the first `ramp` frames, in place. Returns how many
 /// frames of ramp are left after this buffer (0 when the ramp finished).
 pub fn apply_fade_in(samples: &mut [f32], ramp_left: usize) -> usize {
@@ -436,6 +447,8 @@ pub fn apply_fade_in(samples: &mut [f32], ramp_left: usize) -> usize {
 /// scale sine at 20 kHz only moves ~0.13 per sample, so legitimate program
 /// material rarely trips it; hard discontinuities reach 1.0+.
 pub const CLICK_STEP: f32 = 0.5;
+
+pub use crate::format::RAMP_FRAMES;
 
 pub struct ReceiverConfig {
     pub bind: SocketAddr,
@@ -685,6 +698,8 @@ struct Peer {
     last_sample: Option<Vec<f32>>,
     /// Frames of fade-in still owed after a discontinuity (F2).
     ramp_remaining: usize,
+    /// Timed out but kept for a fast resume (F8); cleared on the next packet.
+    frozen: bool,
     /// Rate limit for the "seq gap" evidence line: a lifetime cap hides the
     /// very stalls the switch measurement is supposed to explain.
     last_gap_log: Instant,
@@ -877,6 +892,8 @@ fn run(
     // while at least one of them is missing. Pruning keeps a node that left
     // (or an earlier session's stream) from pinning the mix on forever.
     let mut known_normals: HashMap<u64, (Instant, bool)> = HashMap::new();
+    // F7: one origin arriving from two addresses is a cloned node image.
+    let mut origin_addrs: HashMap<u64, (SocketAddr, Instant)> = HashMap::new();
     let mut active_mix_mask: u64 = 0;
 
     while !stop.load(Ordering::Relaxed) {
@@ -926,6 +943,23 @@ fn run(
                 if !is_mix && header.origin != 0 {
                     known_normals.insert(header.origin, (now, !is_bt));
                     known_normals.retain(|_, (at, _)| now.duration_since(*at) < KNOWN_NORMAL_TTL);
+                    match origin_addrs.get(&header.origin) {
+                        Some((prev, at)) if *prev != addr && now.duration_since(*at) < Duration::from_secs(10) => {
+                            static CLONE_WARNED: std::sync::atomic::AtomicU64 =
+                                std::sync::atomic::AtomicU64::new(0);
+                            if CLONE_WARNED.fetch_add(1, Ordering::Relaxed) < 4 {
+                                log::warn!(
+                                    "udp: origin {:016x} seen from {} and {} — cloned node image (F7)",
+                                    header.origin,
+                                    prev,
+                                    addr
+                                );
+                            }
+                        }
+                        _ => {}
+                    }
+                    origin_addrs.insert(header.origin, (addr, now));
+                    origin_addrs.retain(|_, ( _, at)| now.duration_since(*at) < Duration::from_secs(60));
                 }
                 if is_mix {
                     // A mix carries a bitmask of the origins inside it. It is
@@ -966,6 +1000,21 @@ fn run(
                     }
                 }
 
+                // Ghost streams: a Bluetooth copy for a stream whose Wi-Fi
+                // is still healthy gets dropped below — but it used to build
+                // the stream first (a zombie with 0 packets holding a mixer
+                // slot and a decoder). Gate BEFORE creating the stream; a
+                // first-ever Bluetooth packet (no Wi-Fi state yet, e.g. a
+                // phone that never had Wi-Fi) still passes.
+                if is_bt && addr.port() != config.bind.port() {
+                    if let Some(existing) = peers.get(&key) {
+                        if now.duration_since(existing.last_wifi_seen) <= Duration::from_millis(300)
+                        {
+                            continue;
+                        }
+                    }
+                }
+
                 if !peers.contains_key(&key) {
                     match create_peer(&mixer, &registry, key, addr, &header, &config) {
                         Ok(peer) => {
@@ -988,6 +1037,14 @@ fn run(
                 let Some(peer) = peers.get_mut(&key) else {
                     continue;
                 };
+                if peer.frozen {
+                    // F8 resume: the state survived the timeout, so just ramp
+                    // back in instead of rebuilding the stream.
+                    peer.frozen = false;
+                    peer.ramp_remaining = RAMP_FRAMES;
+                    peer.last_seq = None;
+                    log::info!("stream {} resumed from freeze", peer.id);
+                }
                 if !is_bt {
                     peer.last_wifi_seen = now;
                 }
@@ -1009,10 +1066,10 @@ fn run(
                 // Dual-stack delivers the same frame twice (Wi-Fi + a delayed
                 // Bluetooth copy). Anything at or behind the newest delivered
                 // sequence is a duplicate and is dropped without touching the
-                // decoder; only a genuine sequence wrap (diff near -2^31)
-                // resynchronises. This keeps a stale Bluetooth backlog from
-                // rewinding the jitter buffer.
-                const LATE_DUPLICATE_LIMIT: i32 = -250_000;
+                // decoder; a timeline more than ~5 s behind (1000 x 5 ms)
+                // resynchronises instead — a restarted sender (fresh random
+                // seq) used to be ignored for the remaining ~21 minutes.
+                const LATE_DUPLICATE_LIMIT: i32 = -1_000;
                 // A carrier switch can land far from the timeline the other
                 // carrier has been feeding (a relayed Bluetooth copy may lag
                 // the direct Wi-Fi copy by seconds, or jump ahead when Wi-Fi
@@ -1344,15 +1401,34 @@ fn run(
             } else {
                 PEER_TIMEOUT
             };
-            let alive = now.duration_since(peer.last_seen) < timeout;
-            if !alive {
+            let silent_for = now.duration_since(peer.last_seen);
+            let alive = silent_for < timeout;
+            if !alive && !peer.frozen {
+                // F8 / MIX1: freeze instead of destroy. Tearing the stream
+                // down on every timeout made the receiver rebuild it on the
+                // next burst, and the trim<->underrun loop (MIX1) kept the
+                // stream churning. Flush to silence and keep the state; the
+                // sender's return becomes a fast ramped resume.
+                peer.frozen = true;
+                peer.metrics.active.store(false, Ordering::Relaxed);
+                mixer.flush_stream(peer.id);
+                peer.ramp_remaining = RAMP_FRAMES;
+                peer.last_seq = None;
+                stats.timeouts.fetch_add(1, Ordering::Relaxed);
+                log::info!(
+                    "stream {} ({key:?}) frozen after {:.1} s silence",
+                    peer.id,
+                    silent_for.as_secs_f64()
+                );
+            }
+            let expired = peer.frozen && silent_for >= FREEZE_GRACE;
+            if expired {
                 peer.metrics.active.store(false, Ordering::Relaxed);
                 mixer.remove(peer.id);
                 registry.remove(peer.id);
-                stats.timeouts.fetch_add(1, Ordering::Relaxed);
-                log::info!("stream {} ({key:?}) timed out", peer.id);
+                log::info!("stream {} ({key:?}) evicted after freeze grace", peer.id);
             }
-            alive
+            !expired
         });
     }
 }
@@ -1422,6 +1498,7 @@ fn create_peer(
         last_seen: Instant::now(),
         last_sample: None,
         ramp_remaining: RAMP_FRAMES,
+        frozen: false,
         metrics,
         zero_buf: vec![0.0; frames_for_ms(MAX_GAP_FILL_MS) * CHANNELS],
         bt_streak: if bt_carrier { 1 } else { 0 },
@@ -2006,5 +2083,177 @@ mod tests {
         let left = apply_fade_in(&mut short, RAMP_FRAMES);
         assert_eq!(left, RAMP_FRAMES - 100);
         assert!((short[(100 - 1) * CHANNELS] - 100.0 / 240.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn sender_restart_resyncs_within_five_seconds() {
+        // A restarted sender emits a fresh low sequence. Before the limit was
+        // tightened, anything behind the newest delivered seq for less than
+        // ~21 min was discarded as a late duplicate — the mesh stayed silent
+        // for the rest of that window. At ~5 s the resync fires immediately.
+        let (mixer, handle) = new_mixer(8);
+        let control = MixerControl::new(handle);
+        let receiver = spawn(
+            ReceiverConfig {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                target_ms: 50.0,
+                max_streams: 8,
+                live_target_ms: None,
+                mix_tap: None,
+                bt_exempt_ports: Vec::new(),
+            },
+            control,
+        )
+        .expect("receiver");
+        let origin = 0xABCD_1234;
+        let stream = 99u16;
+        let socket = UdpSocket::bind("127.0.0.1:0").expect("socket");
+        let frames = frames_for_ms(5.0);
+        let send_seq = |socket: &UdpSocket, seq: u32| {
+            let mut datagram = FrameHeader::new(Codec::RawF32, 5, stream, seq, now_us(), origin)
+                .encode()
+                .to_vec();
+            for _ in 0..frames * CHANNELS {
+                datagram.extend_from_slice(&0.1f32.to_le_bytes());
+            }
+            socket.send_to(&datagram, receiver.local_addr).expect("send");
+        };
+
+        // Session 1: run the sequence well past the new limit.
+        for seq in 1..=1100u32 {
+            send_seq(&socket, seq);
+        }
+        std::thread::sleep(Duration::from_millis(200));
+        // Loopback queues drop a few datagrams under a burst like this, so
+        // judge the restart by the delta, not by an absolute total.
+        let baseline = receiver.registry.snapshots()[0].packets;
+
+        // Session 2 (restart): the sender starts over at seq 1. A rewind of
+        // ~1099 frames is beyond the 1000-packet (5 s) tolerance, so it must
+        // resynchronise — and subsequent packets must count as delivered.
+        for seq in 1..=10u32 {
+            send_seq(&socket, seq);
+        }
+        std::thread::sleep(Duration::from_millis(200));
+
+        let snapshots = receiver.registry.snapshots();
+        assert_eq!(snapshots.len(), 1);
+        let after_restart = snapshots[0].packets;
+        assert!(
+            after_restart >= baseline + 9,
+            "restarted sender should be accepted immediately (resync at ~5 s): baseline={baseline} after={after_restart}"
+        );
+        receiver.stop();
+        drop(mixer);
+    }
+
+    #[test]
+    fn stale_bt_backlog_still_dropped_as_duplicate() {
+        // Within the ~5 s window a lagging carrier copy must still be a
+        // silent duplicate, not a reset (the receiver must not jump back).
+        let (mixer, handle) = new_mixer(8);
+        let control = MixerControl::new(handle);
+        let receiver = spawn(
+            ReceiverConfig {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                target_ms: 50.0,
+                max_streams: 8,
+                live_target_ms: None,
+                mix_tap: None,
+                bt_exempt_ports: Vec::new(),
+            },
+            control,
+        )
+        .expect("receiver");
+        let origin = 0x1122_3344;
+        let stream = 55u16;
+        let socket = UdpSocket::bind("127.0.0.1:0").expect("socket");
+        let frames = frames_for_ms(5.0);
+        let send_seq = |socket: &UdpSocket, seq: u32| {
+            let mut datagram = FrameHeader::new(Codec::RawF32, 5, stream, seq, now_us(), origin)
+                .encode()
+                .to_vec();
+            for _ in 0..frames * CHANNELS {
+                datagram.extend_from_slice(&0.1f32.to_le_bytes());
+            }
+            socket.send_to(&datagram, receiver.local_addr).expect("send");
+        };
+
+        for seq in 1..=50u32 {
+            send_seq(&socket, seq);
+        }
+        std::thread::sleep(Duration::from_millis(150));
+        let baseline = receiver.registry.snapshots()[0].packets;
+
+        // A copy 40 frames behind (< 5 s): duplicate, not a resync.
+        send_seq(&socket, 10);
+        std::thread::sleep(Duration::from_millis(150));
+        let snapshots = receiver.registry.snapshots();
+        assert_eq!(snapshots[0].packets, baseline, "stale copy must be dropped");
+        receiver.stop();
+        drop(mixer);
+    }
+
+    #[test]
+    fn timeout_freezes_then_resumes_without_rebuild() {
+        // F8/MIX1: a timed-out stream is frozen (kept, silent) instead of
+        // destroyed; the sender's return is a fast ramped resume.
+        let (mixer, handle) = new_mixer(8);
+        let control = MixerControl::new(handle);
+        let receiver = spawn(
+            ReceiverConfig {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                target_ms: 50.0,
+                max_streams: 8,
+                live_target_ms: None,
+                mix_tap: None,
+                bt_exempt_ports: Vec::new(),
+            },
+            control,
+        )
+        .expect("receiver");
+        let origin = 0xFEED_0001;
+        let socket = UdpSocket::bind("127.0.0.1:0").expect("socket");
+        let frames = frames_for_ms(5.0);
+        let send_seq = |socket: &UdpSocket, seq: u32| {
+            let mut datagram = FrameHeader::new(Codec::RawF32, 5, 11, seq, now_us(), origin)
+                .encode()
+                .to_vec();
+            for _ in 0..frames * CHANNELS {
+                datagram.extend_from_slice(&0.1f32.to_le_bytes());
+            }
+            socket.send_to(&datagram, receiver.local_addr).expect("send");
+        };
+
+        for seq in 1..=10u32 {
+            send_seq(&socket, seq);
+        }
+        std::thread::sleep(Duration::from_millis(150));
+        let baseline = receiver.registry.snapshots()[0].packets;
+        let id = receiver.registry.snapshots()[0].id;
+
+        // Cross the timeout: the stream must freeze, not disappear. The
+        // loopback peer classifies as the BT carrier, whose timeout is 8 s.
+        std::thread::sleep(BT_PEER_TIMEOUT + Duration::from_millis(400));
+        let snapshots = receiver.registry.snapshots();
+        assert_eq!(snapshots.len(), 1, "frozen stream must stay registered");
+        assert!(!snapshots[0].active, "frozen stream is not active");
+
+        // The sender returns: same stream id, no rebuild, audio resumes.
+        for seq in 11..=20u32 {
+            send_seq(&socket, seq);
+        }
+        std::thread::sleep(Duration::from_millis(200));
+        let snapshots = receiver.registry.snapshots();
+        assert_eq!(snapshots.len(), 1, "resume must not create a second stream");
+        assert_eq!(snapshots[0].id, id, "same stream identity across freeze");
+        assert!(snapshots[0].active, "resumed stream is active");
+        assert!(
+            snapshots[0].packets >= baseline + 9,
+            "resume packets accepted: baseline={baseline} now={}",
+            snapshots[0].packets
+        );
+        receiver.stop();
+        drop(mixer);
     }
 }
