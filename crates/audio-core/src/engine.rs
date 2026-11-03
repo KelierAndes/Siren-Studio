@@ -66,6 +66,10 @@ pub struct CenterConfig {
     pub node_id: String,
     /// Bluetooth origin bit advertised over mDNS.
     pub bit: Option<u8>,
+    /// Loopback ports that carry Wi-Fi (in-memory link simulators); see
+    /// `ReceiverConfig::bt_exempt_ports`.
+    #[serde(skip)]
+    pub bt_exempt_ports: Vec<u16>,
     /// Local Bluetooth adapter address advertised over mDNS.
     pub bt: Option<String>,
     /// RFCOMM channel advertised over mDNS.
@@ -90,6 +94,7 @@ impl Default for CenterConfig {
             bt: None,
             bt_channel: None,
             mix_tap: None,
+            bt_exempt_ports: Vec::new(),
         }
     }
 }
@@ -195,6 +200,7 @@ impl CenterEngine {
                     max_streams,
                     live_target_ms: Some(target_ms.clone()),
                     mix_tap: config.mix_tap.clone(),
+                    bt_exempt_ports: config.bt_exempt_ports.clone(),
                 },
                 control.clone(),
             )?;

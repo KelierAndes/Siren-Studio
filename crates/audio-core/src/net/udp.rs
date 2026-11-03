@@ -86,6 +86,12 @@ pub struct UdpSender {
     fail_streak: u32,
     dead_until: Option<Instant>,
     last_fail_log: Option<Instant>,
+    // Heartbeat (F10): request every HB_TICKS ticks, echo comes back from
+    // the peer's bind socket into this connected socket.
+    hb_window: std::collections::VecDeque<u64>,
+    hb_pending: Option<u64>,
+    hb_sent: u64,
+    hb_lost: u64,
 }
 
 /// One shared encoder/sequence per node. Dual-stack sends the *same* encoded
@@ -213,6 +219,7 @@ impl UdpSender {
             target
         };
         socket.connect(socket_target)?;
+        socket.set_nonblocking(true).ok();
         Ok(Self {
             socket,
             target: socket_target,
@@ -222,6 +229,10 @@ impl UdpSender {
             fail_streak: 0,
             dead_until: None,
             last_fail_log: None,
+            hb_window: std::collections::VecDeque::new(),
+            hb_pending: None,
+            hb_sent: 0,
+            hb_lost: 0,
         })
     }
 
@@ -231,6 +242,50 @@ impl UdpSender {
 
     pub fn target(&self) -> SocketAddr {
         self.target
+    }
+
+    /// Send one heartbeat request; a still-pending previous request counts
+    /// as lost (the peer stopped answering or the path ate both copies).
+    pub fn send_heartbeat(&mut self) {
+        if self.hb_pending.take().is_some() {
+            self.hb_lost += 1;
+        }
+        let ts = crate::metrics::now_us();
+        let mut buf = [0u8; HB_LEN];
+        buf[..4].copy_from_slice(&HB_MAGIC);
+        buf[4..12].copy_from_slice(&ts.to_le_bytes());
+        buf[12] = HB_REQUEST;
+        if self.socket.send(&buf).is_ok() {
+            self.hb_pending = Some(ts);
+            self.hb_sent += 1;
+        }
+    }
+
+    /// Drain heartbeat echoes (non-blocking); returns true when an RTT
+    /// sample was recorded.
+    pub fn poll_heartbeat(&mut self) -> bool {
+        let mut got = false;
+        let mut buf = [0u8; HB_LEN];
+        while let Ok(len) = self.socket.recv(&mut buf) {
+            if len >= HB_LEN && buf[..4] == HB_MAGIC && buf[12] == HB_ECHO {
+                let ts = u64::from_le_bytes(buf[4..12].try_into().unwrap_or([0; 8]));
+                if self.hb_pending.map(|pending| pending == ts).unwrap_or(false) {
+                    self.hb_window.push_back(crate::metrics::now_us().saturating_sub(ts));
+                    if self.hb_window.len() > 32 {
+                        self.hb_window.pop_front();
+                    }
+                    self.hb_pending = None;
+                    got = true;
+                }
+            }
+        }
+        got
+    }
+
+    /// Current rolling health of this path (zeros until samples exist).
+    pub fn path_health(&self) -> PathHealth {
+        let window: Vec<u64> = self.hb_window.iter().copied().collect();
+        PathHealth::from_window(&window, self.hb_sent, self.hb_lost)
     }
 
     pub fn stream_id(&self) -> u16 {
@@ -308,7 +363,56 @@ fn stream_id_from_clock() -> u16 {
     }
 }
 
-#[derive(Clone, Debug)]
+/// Heartbeat datagram: magic + u64 send timestamp (us) + kind
+/// (0 = request, 1 = echo). Sent every 500 ms per Wi-Fi peer; the peer's
+/// receiver echoes from its bind socket, so the requester measures one-way
+/// there and back on the exact carrier path the audio uses (F10).
+pub const HB_MAGIC: [u8; 4] = *b"HB01";
+pub const HB_REQUEST: u8 = 0;
+pub const HB_ECHO: u8 = 1;
+pub const HB_LEN: usize = 13;
+/// One heartbeat every 100 mesh ticks = 500 ms at 5 ms frames.
+pub const HB_TICKS: u64 = 100;
+
+/// Rolling path health measured by the heartbeat requester.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PathHealth {
+    pub rtt_p50_us: u64,
+    pub rtt_p99_us: u64,
+    /// Unanswered heartbeats over all sent, in percent.
+    pub loss_pct: f64,
+    pub samples: u64,
+}
+
+impl PathHealth {
+    fn from_window(window: &[u64], sent: u64, lost: u64) -> Self {
+        let mut sorted = window.to_vec();
+        sorted.sort_unstable();
+        let pick = |q: f64| {
+            if sorted.is_empty() {
+                0
+            } else {
+                sorted[((q * (sorted.len() - 1) as f64).round()) as usize]
+            }
+        };
+        Self {
+            rtt_p50_us: pick(0.5),
+            rtt_p99_us: pick(0.99),
+            loss_pct: if sent > 0 {
+                100.0 * lost as f64 / sent as f64
+            } else {
+                0.0
+            },
+            samples: window.len() as u64,
+        }
+    }
+}
+
+/// A sample-to-sample jump larger than this is counted as a click. A full
+/// scale sine at 20 kHz only moves ~0.13 per sample, so legitimate program
+/// material rarely trips it; hard discontinuities reach 1.0+.
+pub const CLICK_STEP: f32 = 0.5;
+
 pub struct ReceiverConfig {
     pub bind: SocketAddr,
     pub target_ms: f32,
@@ -319,6 +423,11 @@ pub struct ReceiverConfig {
     /// Decoded audio per origin, consumed by a hub that forwards N-1 mixes
     /// over Bluetooth.
     pub mix_tap: Option<Arc<MixTap>>,
+    /// Loopback ports that carry Wi-Fi, not Bluetooth. The tunnel injects on
+    /// loopback, so loopback sources classify as the Bluetooth carrier —
+    /// which is what makes in-memory link simulators (whose fronts are also
+    /// loopback) need this exemption. Empty in production.
+    pub bt_exempt_ports: Vec<u16>,
 }
 
 /// Latest decoded audio per origin. A hub builds one mix per Bluetooth link
@@ -547,6 +656,9 @@ struct Peer {
     bt_target_ms: f32,
     /// In-flight carrier switch, timed until the stream is audible again.
     switch: Option<SwitchTrace>,
+    /// Last sample per channel from the previous delivery; the click
+    /// detector diffs against it across packet boundaries.
+    last_sample: Option<Vec<f32>>,
     /// Rate limit for the "seq gap" evidence line: a lifetime cap hides the
     /// very stalls the switch measurement is supposed to explain.
     last_gap_log: Instant,
@@ -607,6 +719,7 @@ impl Peer {
         if let Some(tap) = tap {
             tap.push(self.origin, &samples, MIX_TAP_SAMPLES, bt);
         }
+        self.count_clicks(&samples);
         self.analyzer.push(&samples, &self.metrics);
         if self.metrics.packets.load(Ordering::Relaxed) == 0 {
             let peak = samples.iter().fold(0.0f32, |acc, s| acc.max(s.abs()));
@@ -632,6 +745,36 @@ impl Peer {
                 .fetch_add(1, Ordering::Relaxed);
         }
         Ok(frames)
+    }
+
+    /// Sample-to-sample step detection: a jump beyond [`CLICK_STEP`] is
+    /// what the listener hears as a "click". Hard cuts at underruns, gap
+    /// zero-fills, flushes and carrier switches all show up here — this is
+    /// the acceptance metric for the ramp/xfade work (F2).
+    fn count_clicks(&mut self, samples: &[f32]) {
+        let channels = samples.len() - samples.len() % CHANNELS;
+        if channels == 0 {
+            return;
+        }
+        if let Some(prev) = &self.last_sample {
+            let mut clicks = 0u64;
+            for ch in 0..prev.len() {
+                let mut previous = prev[ch];
+                let mut index = ch;
+                while index + CHANNELS <= samples.len() {
+                    let current = samples[index];
+                    if (current - previous).abs() > CLICK_STEP {
+                        clicks += 1;
+                    }
+                    previous = current;
+                    index += CHANNELS;
+                }
+            }
+            if clicks > 0 {
+                self.metrics.clicks.fetch_add(clicks, Ordering::Relaxed);
+            }
+        }
+        self.last_sample = Some(samples[channels - CHANNELS..channels].to_vec());
     }
 
     /// Opus packet-loss concealment; returns concealed frames.
@@ -713,6 +856,18 @@ fn run(
                 stats.datagrams.fetch_add(1, Ordering::Relaxed);
                 stats.bytes.fetch_add(len as u64, Ordering::Relaxed);
                 let datagram = &buffer[..len];
+                // Heartbeats ride on the same socket but are not frames:
+                // echo requests straight back, echoes are for the sender.
+                if len >= HB_LEN && datagram[..4] == HB_MAGIC {
+                    if datagram[12] == HB_REQUEST {
+                        let mut echo = [0u8; HB_LEN];
+                        echo[..4].copy_from_slice(&HB_MAGIC);
+                        echo[4..12].copy_from_slice(&datagram[4..12]);
+                        echo[12] = HB_ECHO;
+                        let _ = socket.send_to(&echo, addr);
+                    }
+                    continue;
+                }
                 let header = match FrameHeader::decode(datagram) {
                     Ok((header, payload)) => (header, payload),
                     Err(error) => {
@@ -733,7 +888,11 @@ fn run(
                 let (header, payload) = header;
                 let key = PeerKey::new(header.origin, addr, header.stream_id);
                 let is_mix = header.stream_id == crate::protocol::MIX_STREAM_ID;
-                let is_bt = addr.ip().is_loopback();
+                // The tunnel injects on loopback, so a loopback source means
+                // the Bluetooth carrier — unless the port is an exempted
+                // Wi-Fi front (in-memory link simulator in tests).
+                let is_bt =
+                    addr.ip().is_loopback() && !config.bt_exempt_ports.contains(&addr.port());
                 let now = Instant::now();
                 if !is_mix && header.origin != 0 {
                     known_normals.insert(header.origin, (now, !is_bt));
@@ -838,7 +997,6 @@ fn run(
                 // hundreds of frames behind while Wi-Fi delivers normally,
                 // and accepting those stale bursts would make the timeline
                 // jump back and forth.
-                let is_bt = addr.ip().is_loopback();
                 let switched = is_bt != peer.last_path_bt || header.codec != peer.last_codec;
                 let stalled = peer.last_seen.elapsed() > CARRIER_STALL;
                 // What the listener actually loses: the span between two
@@ -981,8 +1139,10 @@ fn run(
                         let path = if addr.ip().is_loopback() {
                             if addr.port() == config.bind.port() {
                                 "local"
-                            } else {
+                            } else if is_bt {
                                 "bt"
+                            } else {
+                                "wifi"
                             }
                         } else {
                             "wifi"
@@ -993,7 +1153,7 @@ fn run(
                             active_mix_mask = header.mix_mask;
                         }
                         peer.metrics.set_source(&addr.to_string(), path);
-                        peer.last_path_bt = addr.ip().is_loopback();
+                        peer.last_path_bt = is_bt;
                         peer.last_codec = header.codec;
                         if peer.last_report.elapsed() >= Duration::from_secs(5) {
                             peer.last_report = Instant::now();
@@ -1014,7 +1174,7 @@ fn run(
                                 linear_to_db(f32::from_bits(m.rms.load(Ordering::Relaxed)))
                             );
                         }
-                        if addr.ip().is_loopback() {
+                        if is_bt {
                             peer.bt_streak = peer.bt_streak.saturating_add(1);
                             if !peer.bt_target_raised && peer.bt_streak >= BT_TARGET_STREAK {
                                 let target = target_now(&config).max(BT_STREAM_TARGET_MS);
@@ -1197,7 +1357,7 @@ fn create_peer(
         header.codec,
         base_target,
     ));
-    let bt_carrier = addr.ip().is_loopback();
+    let bt_carrier = addr.ip().is_loopback() && !config.bt_exempt_ports.contains(&addr.port());
     let target_ms = if bt_carrier {
         base_target.max(BT_STREAM_TARGET_MS)
     } else {
@@ -1227,6 +1387,7 @@ fn create_peer(
         decoders,
         last_seq: None,
         last_seen: Instant::now(),
+        last_sample: None,
         metrics,
         zero_buf: vec![0.0; frames_for_ms(MAX_GAP_FILL_MS) * CHANNELS],
         bt_streak: if bt_carrier { 1 } else { 0 },
@@ -1282,6 +1443,7 @@ mod tests {
                 max_streams: 8,
                 live_target_ms: None,
                 mix_tap: None,
+                bt_exempt_ports: Vec::new(),
             },
             control,
         )
@@ -1351,6 +1513,7 @@ mod tests {
                 max_streams: 8,
                 live_target_ms: None,
                 mix_tap: None,
+                bt_exempt_ports: Vec::new(),
             },
             control,
         )
@@ -1402,6 +1565,7 @@ mod tests {
                 max_streams: 8,
                 live_target_ms: None,
                 mix_tap: None,
+                bt_exempt_ports: Vec::new(),
             },
             control,
         )
@@ -1468,6 +1632,7 @@ mod tests {
                 max_streams: 8,
                 live_target_ms: None,
                 mix_tap: None,
+                bt_exempt_ports: Vec::new(),
             },
             control,
         )
@@ -1574,6 +1739,7 @@ mod tests {
                 max_streams: 8,
                 live_target_ms: None,
                 mix_tap: None,
+                bt_exempt_ports: Vec::new(),
             },
             control,
         )
@@ -1692,6 +1858,7 @@ mod tests {
                 max_streams: 8,
                 live_target_ms: None,
                 mix_tap: None,
+                bt_exempt_ports: Vec::new(),
             },
             control,
         )
@@ -1713,5 +1880,79 @@ mod tests {
         assert_eq!(receiver.registry.snapshots().len(), 2);
         receiver.stop();
         drop(mixer);
+    }
+
+    #[test]
+    fn heartbeat_echo_round_trip() {
+        let (mixer, handle) = new_mixer(8);
+        let control = MixerControl::new(handle);
+        let receiver = spawn(
+            ReceiverConfig {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                target_ms: 50.0,
+                max_streams: 8,
+                live_target_ms: None,
+                mix_tap: None,
+                bt_exempt_ports: Vec::new(),
+            },
+            control,
+        )
+        .unwrap();
+        let mut sender = UdpSender::new(receiver.local_addr, Codec::RawF32, 5, 0x1234).unwrap();
+        sender.send_heartbeat();
+        // The receiver echoes from its bind socket; give it a moment.
+        for _ in 0..100 {
+            if sender.poll_heartbeat() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let health = sender.path_health();
+        assert!(health.samples >= 1, "echo should be measured");
+        assert!(health.rtt_p50_us < 50_000, "loopback RTT should be small: {:?}", health);
+        assert_eq!(health.loss_pct, 0.0);
+        receiver.stop();
+        let _ = mixer;
+    }
+
+    #[test]
+    fn click_detector_counts_hard_steps() {
+        let (mixer, handle) = new_mixer(8);
+        let control = MixerControl::new(handle);
+        let registry = MetricsRegistry::default();
+        let header = FrameHeader::new(Codec::RawF32, 5, 7, 1, 0, 0x1234);
+        let mut peer = create_peer(
+            &control,
+            &Arc::new(registry),
+            PeerKey::new(0x1234, "127.0.0.1:1".parse().unwrap(), 7),
+            "127.0.0.1:1".parse().unwrap(),
+            &header,
+            &ReceiverConfig {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                target_ms: 50.0,
+                max_streams: 8,
+                live_target_ms: None,
+                mix_tap: None,
+                bt_exempt_ports: Vec::new(),
+            },
+        )
+        .unwrap();
+        // Smooth sine: no clicks.
+        let mut smooth = Vec::new();
+        for i in 0..480 {
+            let v = 0.25 * (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 48000.0).sin();
+            smooth.extend_from_slice(&[v, v]);
+        }
+        peer.count_clicks(&smooth);
+        assert_eq!(peer.metrics.clicks.load(Ordering::Relaxed), 0);
+        // Hard cut to -1.0 on one channel: the first transition is a click.
+        let mut cut = vec![0.0f32; 480 * 2];
+        for i in 0..480 {
+            cut[i * 2] = -1.0;
+        }
+        peer.count_clicks(&cut);
+        let clicks = peer.metrics.clicks.load(Ordering::Relaxed);
+        assert!(clicks >= 1, "hard cut should count as a click: {clicks}");
+        let _ = mixer;
     }
 }

@@ -71,6 +71,9 @@ pub struct StreamMetrics {
     pub lost_frames: AtomicU64,
     pub plc_frames: AtomicU64,
     pub overflow_packets: AtomicU64,
+    /// Sample-to-sample steps beyond the click threshold: hard cuts at
+    /// underruns, flushes and carrier switches all land here (F2's metric).
+    pub clicks: AtomicU64,
     pub last_packet_us: AtomicU64,
     pub active: AtomicBool,
 }
@@ -110,6 +113,7 @@ impl StreamMetrics {
             lost_frames: AtomicU64::new(0),
             plc_frames: AtomicU64::new(0),
             overflow_packets: AtomicU64::new(0),
+            clicks: AtomicU64::new(0),
             last_packet_us: AtomicU64::new(0),
             active: AtomicBool::new(false),
         }
@@ -207,6 +211,7 @@ impl StreamMetrics {
             lost_frames: self.lost_frames.load(Ordering::Relaxed),
             plc_frames: self.plc_frames.load(Ordering::Relaxed),
             overflow_packets: self.overflow_packets.load(Ordering::Relaxed),
+            clicks: self.clicks.load(Ordering::Relaxed),
             age_ms: if last == 0 {
                 0
             } else {
@@ -261,6 +266,8 @@ pub struct StreamSnapshot {
     pub lost_frames: u64,
     pub plc_frames: u64,
     pub overflow_packets: u64,
+    /// Audible discontinuities detected on this stream (sample steps).
+    pub clicks: u64,
     pub age_ms: u64,
 }
 

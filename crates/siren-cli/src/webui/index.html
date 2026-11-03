@@ -283,6 +283,7 @@
             <div class="well readout">
               <div class="fact">角色<b id="roleText">等待</b></div>
               <div class="fact">链路<b id="linkText">等待</b></div>
+              <div class="fact">延迟<b id="rttText">—</b></div>
             </div>
             <button class="bigbtn" id="join">加入组网</button>
           </div>
@@ -522,6 +523,7 @@ function slotMarkup(index, stream, snap) {
           <div class="fact">路径<b>${stream ? esc(pathLabel(stream.path)) : "—"}</b></div>
           <div class="fact">丢帧<b>${stream ? (Number(stream.lost_frames) || 0) : 0}</b></div>
           <div class="fact">欠载<b>${stream ? (Number(stream.underruns) || 0) : 0}</b></div>
+          <div class="fact">咔哒<b>${stream ? (Number(stream.clicks) || 0) : 0}</b></div>
         </div>
       </div>
     </div>`;
@@ -553,10 +555,11 @@ function renderSlots(snap) {
         buf.className = bufClass(stream);
       }
       const facts = slot.querySelectorAll(".fact b");
-      if (facts.length === 3) {
+      if (facts.length === 4) {
         facts[0].textContent = stream ? pathLabel(stream.path) : "—";
         facts[1].textContent = stream ? (Number(stream.lost_frames) || 0) : 0;
         facts[2].textContent = stream ? (Number(stream.underruns) || 0) : 0;
+        facts[3].textContent = stream ? (Number(stream.clicks) || 0) : 0;
       }
       const name = $(".cname", slot);
       if (name && stream) { const text = streamName(stream, snap); if (name.textContent !== text) name.textContent = text; }
@@ -706,6 +709,12 @@ function render() {
   $("#deviceCount").textContent = (s.running ? devices : 1) + " 台";
   $("#roleText").textContent = roleLabel(bt.role);
   $("#linkText").textContent = s.running ? `${btStateLabel(bt.state)} · ${bt.links ?? 0} 路` : "等待";
+  const rtts = (snap.peers || [])
+    .map((peer) => Number(peer.rtt_ms))
+    .filter((v) => Number.isFinite(v) && v >= 0);
+  $("#rttText").textContent = rtts.length
+    ? `${Math.min(...rtts).toFixed(0)}–${Math.max(...rtts).toFixed(0)} ms`
+    : "—";
   const join = $("#join");
   join.textContent = s.starting ? "加入中…" : (s.running ? "离开组网" : "加入组网");
   join.classList.toggle("leave", Boolean(s.running));

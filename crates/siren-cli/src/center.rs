@@ -80,6 +80,7 @@ pub fn run(args: CenterArgs) -> Result<()> {
             max_streams: args.max_streams,
             live_target_ms: None,
             mix_tap: None,
+            bt_exempt_ports: Vec::new(),
         },
         mixer_control,
     )?;

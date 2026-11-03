@@ -68,6 +68,10 @@ pub struct MeshConfig {
     pub bt: Option<String>,
     /// RFCOMM channel advertised to peers.
     pub bt_channel: Option<u8>,
+    /// Loopback ports that carry Wi-Fi (in-memory link simulators); passed
+    /// through to the receiver's carrier classification.
+    #[serde(skip)]
+    pub bt_exempt_ports: Vec<u16>,
     /// Stable node identity. `None` falls back to `SIREN_NODE_ID`, then to the
     /// id persisted for this machine, then to a fresh random id.
     pub node_id: Option<String>,
@@ -96,6 +100,7 @@ impl Default for MeshConfig {
             bt: None,
             bt_channel: None,
             node_id: None,
+            bt_exempt_ports: Vec::new(),
         }
     }
 }
@@ -110,6 +115,10 @@ pub struct MeshPeer {
     pub endpoint: String,
     pub bit: Option<u8>,
     pub bt: Option<String>,
+    /// Heartbeat path health to this peer (None until samples exist).
+    pub rtt_ms: Option<f64>,
+    pub rtt_p99_ms: Option<f64>,
+    pub loss_pct: Option<f64>,
 }
 
 /// One node seen over mDNS. Used both for the Wi-Fi send list and for the
@@ -234,6 +243,8 @@ struct MeshShared {
     topology: Arc<Mutex<Vec<TopologyPeer>>>,
     tunnel: Mutex<Option<SocketAddr>>,
     bt: Mutex<BtStatus>,
+    /// Per-endpoint heartbeat health measured by the sender thread.
+    health: Mutex<HashMap<String, crate::net::udp::PathHealth>>,
     /// Latest decoded audio per origin; the hub builds N-1 mixes from it.
     mix_tap: Arc<crate::net::udp::MixTap>,
     /// Set when this node currently acts as the Bluetooth hub.
@@ -357,6 +368,7 @@ impl MeshEngine {
             capture_buffer: AtomicUsize::new(0),
             tx_rms_db: AtomicU32::new(0),
             peers: Mutex::new(Vec::new()),
+            health: Mutex::new(HashMap::new()),
             topology: Arc::new(Mutex::new(Vec::new())),
             tunnel: Mutex::new(None),
             bt: Mutex::new(BtStatus {
@@ -366,6 +378,36 @@ impl MeshEngine {
             mix_tap: mix_tap.clone(),
             bt_hub: AtomicBool::new(false),
         });
+
+        // Static peers carrying identity or Bluetooth hints seed the
+        // topology, so hub election works without mDNS (offline rigs,
+        // static meshes, in-memory tests).
+        let pinned_topology: Vec<TopologyPeer> = config
+            .static_peers
+            .iter()
+            .filter_map(|spec| match parse_pinned_peer(spec) {
+                Ok(info) => (info.id.is_some() || info.bt.is_some()).then_some(info),
+                Err(error) => {
+                    log::warn!("mesh: ignoring bad static peer '{spec}': {error}");
+                    None
+                }
+            })
+            .map(|info| {
+                let id = info.id.unwrap_or_default();
+                TopologyPeer {
+                    name: info.name.unwrap_or_else(|| "pinned".into()),
+                    uid: node_uid(&id),
+                    id,
+                    endpoint: info.addr.to_string(),
+                    bit: info.bit,
+                    bt: info.bt,
+                    bt_channel: None,
+                }
+            })
+            .collect();
+        if !pinned_topology.is_empty() {
+            *shared.topology.lock().unwrap() = pinned_topology;
+        }
 
         let center = CenterEngine::start(CenterConfig {
             bind: config.bind.clone(),
@@ -387,6 +429,7 @@ impl MeshEngine {
             bt: config.bt.clone(),
             bt_channel: config.bt_channel,
             mix_tap: Some(mix_tap),
+            bt_exempt_ports: config.bt_exempt_ports.clone(),
         })?;
 
         let bind = center.bind_addr();
@@ -582,16 +625,16 @@ fn run_mesh_sender(
     // Discovery thread keeps this map fresh; static peers are pinned.
     let peers: PeerMap = Arc::new(Mutex::new(HashMap::new()));
     for pinned in &config.static_peers {
-        match resolve_ipv4(pinned) {
-            Ok(addr) => {
+        match parse_pinned_peer(pinned) {
+            Ok(info) => {
                 peers.lock().unwrap().insert(
-                    addr.to_string(),
+                    info.addr.to_string(),
                     SendPeer {
-                        name: "pinned".into(),
-                        id: String::new(),
-                        addr,
-                        bit: None,
-                        bt: None,
+                        name: info.name.clone().unwrap_or_else(|| "pinned".into()),
+                        id: info.id.clone().unwrap_or_default(),
+                        addr: info.addr,
+                        bit: info.bit,
+                        bt: info.bt,
                         pinned: true,
                         last_seen: Instant::now(),
                     },
@@ -663,6 +706,7 @@ fn run_mesh_sender(
     let mut tunnel_sender: Option<(SocketAddr, UdpSender)> = None;
     let mut total_packets: u64 = 0;
     let origin = shared.uid;
+    let mut hb_counter: u32 = 0;
     let mut tx_report: u64 = 0;
     let mut packer = match FramePacker::new(codec, config.frame_ms, origin) {
         Ok(packer) => packer,
@@ -770,16 +814,30 @@ fn run_mesh_sender(
             };
         }
 
+        let health = shared.health.lock().unwrap().clone();
         let peer_snapshot: Vec<MeshPeer> = current
             .iter()
             .filter(|(_, peer)| peer.pinned || peer.last_seen.elapsed() < PEER_UI_FRESHNESS)
-            .map(|(_, peer)| MeshPeer {
-                name: peer.name.clone(),
-                id: peer.id.clone(),
-                uid: node_uid(&peer.id),
-                endpoint: peer.addr.to_string(),
-                bit: peer.bit,
-                bt: peer.bt.clone(),
+            .map(|(_, peer)| {
+                let entry = health.get(&peer.addr.to_string());
+                let rtt_ms = entry
+                    .filter(|h| h.samples > 0)
+                    .map(|h| h.rtt_p50_us as f64 / 1000.0);
+                let rtt_p99_ms = entry
+                    .filter(|h| h.samples > 0)
+                    .map(|h| h.rtt_p99_us as f64 / 1000.0);
+                let loss_pct = entry.filter(|h| h.samples > 0).map(|h| h.loss_pct);
+                MeshPeer {
+                    name: peer.name.clone(),
+                    id: peer.id.clone(),
+                    uid: node_uid(&peer.id),
+                    endpoint: peer.addr.to_string(),
+                    bit: peer.bit,
+                    bt: peer.bt.clone(),
+                    rtt_ms,
+                    rtt_p99_ms,
+                    loss_pct,
+                }
             })
             .collect();
         *shared.peers.lock().unwrap() = peer_snapshot;
@@ -807,6 +865,21 @@ fn run_mesh_sender(
                     }
                 }
             }
+        }
+        // Heartbeat (F10): request every 500 ms, drain echoes every tick,
+        // and publish the rolling path health for the snapshot/UI.
+        hb_counter += 1;
+        for (endpoint, sender) in senders.iter_mut() {
+            sender.poll_heartbeat();
+            if hb_counter % (crate::net::udp::HB_TICKS as u32) == 0 {
+                sender.send_heartbeat();
+            }
+            let health = sender.path_health();
+            shared
+                .health
+                .lock()
+                .unwrap()
+                .insert(endpoint.clone(), health);
         }
         if let Some((_, sender)) = tunnel_sender.as_mut() {
             if shared.bt_hub.load(Ordering::Relaxed) {
@@ -1038,6 +1111,55 @@ fn resolve_ipv4(endpoint: &str) -> Result<SocketAddr> {
         .map_err(|e| CoreError::Discovery(format!("cannot resolve '{endpoint}': {e}")))?
         .find(|addr| addr.is_ipv4())
         .ok_or_else(|| CoreError::Discovery(format!("no ipv4 address for '{endpoint}'")))
+}
+
+/// A pinned peer parsed out of `MeshConfig::static_peers`.
+#[derive(Clone, Debug)]
+pub struct PinnedPeer {
+    pub addr: SocketAddr,
+    pub bt: Option<String>,
+    pub bit: Option<u8>,
+    pub name: Option<String>,
+    pub id: Option<String>,
+}
+
+/// Parse a static peer spec: `ip:port`, optionally followed by `?`-params
+/// that stand in for the mDNS TXT records real discovery would deliver —
+/// `bt=<address>` and `id=<s>` make the peer take part in the Bluetooth hub
+/// election, `bit=<n>` and `name=<s>` enrich the topology. Unknown params
+/// are rejected so a typo cannot silently disable the overlay.
+pub fn parse_pinned_peer(spec: &str) -> Result<PinnedPeer> {
+    let (endpoint, params) = spec.split_once('?').unwrap_or((spec, ""));
+    let mut peer = PinnedPeer {
+        addr: resolve_ipv4(endpoint)?,
+        bt: None,
+        bit: None,
+        name: None,
+        id: None,
+    };
+    for pair in params.split('&').filter(|p| !p.is_empty()) {
+        let (key, value) = pair.split_once('=').ok_or_else(|| {
+            CoreError::InvalidArgument(format!(
+                "pinned peer param must be key=value: '{pair}' in '{spec}'"
+            ))
+        })?;
+        match key {
+            "bt" => peer.bt = Some(value.to_string()),
+            "bit" => {
+                peer.bit = Some(value.parse().map_err(|_| {
+                    CoreError::InvalidArgument(format!("bad bit '{value}' in '{spec}'"))
+                })?)
+            }
+            "name" => peer.name = Some(value.to_string()),
+            "id" => peer.id = Some(value.to_string()),
+            other => {
+                return Err(CoreError::InvalidArgument(format!(
+                    "unknown pinned peer param '{other}' in '{spec}'"
+                )))
+            }
+        }
+    }
+    Ok(peer)
 }
 
 #[cfg(test)]
