@@ -44,8 +44,14 @@ DAEMON_ENV = "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus"
 
 
 def daemon_cmdline(host: str, password: str, hostkey: str | None) -> str | None:
-    out = ssh(host, password, hostkey, "ps -C siren -o args=", timeout=20)
-    for line in out.splitlines():
+    # `ps -C` exits 1 when no siren is running — that is a valid state (the
+    # matrix may run on a host without the persistent daemon).
+    result = subprocess.run(
+        ["plink", "-batch", "-ssh", "-hostkey", hostkey or "SHA256:xvTGpWJxeqqcQb/aPVpkOP6YTMfIq7sl8tWQ4iwTSRU",
+         "-pw", password, host, "ps -C siren -o args="],
+        capture_output=True, text=True, timeout=20,
+    )
+    for line in (result.stdout or "").splitlines():
         line = line.strip()
         if line.startswith("siren web") or " web " in line:
             return line
