@@ -74,14 +74,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    override fun onDestroy() {
-        try {
-            SirenPlaybackService.stop(this)
-        } catch (_: Throwable) {
-        }
-        super.onDestroy()
-    }
-
     // ---- Bluetooth: automatic leaf link, no user-facing transport choice --
 
     private fun btPermissionGranted(): Boolean {
@@ -406,6 +398,10 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        try {
+            SirenPlaybackService.stop(this)
+        } catch (_: Throwable) {
+        }
         stopSystemCapture()
         synchronized(btLock) {
             btGeneration++

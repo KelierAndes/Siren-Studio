@@ -218,6 +218,9 @@ pub struct MeshSenderStats {
     pub silent_ms: u64,
     /// E7/A11: unix us when the first audible capture frame was queued.
     pub first_frame_epoch_us: u64,
+    /// F5: the codec actually being sent right now (changes under
+    /// adaptive degradation).
+    pub codec: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -266,6 +269,8 @@ struct MeshShared {
     silent_tx_ms: AtomicU64,
     /// F15: learned node table (from gossip datagrams).
     gossip: Arc<crate::net::udp::GossipTable>,
+    /// F5: current sending codec (adaptive switches update it).
+    sender_codec: Mutex<Option<&'static str>>,
     /// E7/A11: unix us of the first audible captured frame — absolute
     /// end-to-end latency becomes measurable against the receiver's clock.
     first_frame_epoch_us: AtomicU64,
@@ -412,6 +417,7 @@ impl MeshEngine {
             silent_tx_ms: AtomicU64::new(0),
             first_frame_epoch_us: AtomicU64::new(0),
             gossip: gossip.clone(),
+            sender_codec: Mutex::new(Some(config.codec.to_codec().as_str())),
             topology: Arc::new(Mutex::new(Vec::new())),
             tunnel: Mutex::new(None),
             bt: Mutex::new(BtStatus {
@@ -563,6 +569,13 @@ impl MeshEngine {
                 tx_rms_db: f32::from_bits(self.shared.tx_rms_db.load(Ordering::Relaxed)) as f64,
                 silent_ms: self.shared.silent_tx_ms.load(Ordering::Relaxed),
                 first_frame_epoch_us: self.shared.first_frame_epoch_us.load(Ordering::Relaxed),
+                codec: self
+                    .shared
+                    .sender_codec
+                    .lock()
+                    .unwrap()
+                    .unwrap_or("raw")
+                    .to_string(),
             },
             center: self.center.snapshot(),
             error: self.shared.error.lock().unwrap().clone(),
@@ -771,6 +784,18 @@ fn run_mesh_sender(
         Duration::from_micros((frame_frames as u64 * 1_000_000) / SAMPLE_RATE as u64);
     let mut pcm = vec![0.0f32; frame_frames * CHANNELS];
     let mut next_tick = Instant::now();
+    // F5/E6: per-endpoint adaptive codec state. `0` = configured codec;
+    // while running Opus the counter tracks consecutive healthy ticks.
+    let mut adaptive: HashMap<String, u32> = HashMap::new();
+    // F5 anti-flap: each degrade->restore cycle on one endpoint doubles the
+    // healthy time required before the next restore (30 s, 1 min, 2, 4, 8,
+    // 16 min cap). A genuinely improved link is still re-probed, just less
+    // and less often; a capped link settles on Opus instead of flapping.
+    let mut restore_attempts: HashMap<String, u32> = HashMap::new();
+    const ADAPT_RTT_US: u64 = 400_000;
+    const ADAPT_HEALTHY_US: u64 = 200_000;
+    const ADAPT_BACK_TICKS: u32 = 60; // 30 s healthy before restoring
+    const ADAPT_OPUS_BITRATE: i32 = 48_000;
     let mut senders: HashMap<String, UdpSender> = HashMap::new();
     let mut tunnel_sender: Option<(SocketAddr, UdpSender)> = None;
     let mut total_packets: u64 = 0;
@@ -894,6 +919,11 @@ fn run_mesh_sender(
         // endpoint for ~20 s. The audio we RECEIVE carries the peer's current
         // IP — prefer it over a stale discovery entry (port stays from
         // discovery: the incoming port is an ephemeral sender port).
+        //
+        // F5: hearing the peer's audio is ALSO proof of liveness — under
+        // congestion mDNS answers get flaky and the 30 s TTL would expire a
+        // peer whose uplink still flows, dropping the sender right when the
+        // adaptive downgrade needs a subject. Refresh last_seen from audio.
         {
             let mut peers_now = peers.lock().unwrap();
             for peer in peers_now.values_mut() {
@@ -901,7 +931,7 @@ fn run_mesh_sender(
                 if uid == 0 {
                     continue;
                 }
-                if let Some((addr, _)) = shared.mix_tap.last_addr(uid, Duration::from_secs(5)) {
+                if let Some((addr, at)) = shared.mix_tap.last_addr(uid, Duration::from_secs(3)) {
                     if addr.ip() != peer.addr.ip() {
                         log::info!(
                             "mesh: peer {} moved {} -> {} (from received audio)",
@@ -911,6 +941,7 @@ fn run_mesh_sender(
                         );
                         peer.addr.set_ip(addr.ip());
                     }
+                    peer.last_seen = at;
                 }
             }
         }
@@ -918,13 +949,6 @@ fn run_mesh_sender(
         // Sync local senders with the current peer set.
         let current = peers.lock().unwrap().clone();
         senders.retain(|endpoint, _| current.contains_key(endpoint));
-        // F5/E6: per-endpoint adaptive codec state. `0` = configured codec;
-        // while running Opus the counter tracks consecutive healthy ticks.
-        let mut adaptive: HashMap<String, u32> = HashMap::new();
-        const ADAPT_RTT_US: u64 = 400_000;
-        const ADAPT_HEALTHY_US: u64 = 200_000;
-        const ADAPT_BACK_TICKS: u32 = 60; // 30 s healthy before restoring
-        const ADAPT_OPUS_BITRATE: i32 = 48_000;
         let mesh_key: Option<Arc<crate::net::crypto::MeshKey>> = config
             .password
             .as_ref()
@@ -1084,50 +1108,62 @@ fn run_mesh_sender(
             if hb_counter % (crate::net::udp::HB_TICKS as u32) == 0 {
                 sender.send_heartbeat();
             }
-            // F5: degrade to Opus when the path stays slow, restore when it
-            // has been healthy for a while. The switch keeps the stream id
-            // and sequence, so the receiver hears a carrier-style change.
+            // F5: degrade to Opus when the path stays slow OR is so
+            // saturated that heartbeat echoes stop coming back (a full
+            // queue means zero RTT samples but ~100 % heartbeat loss —
+            // rtt alone is blind exactly when it matters). The switch
+            // keeps the stream id and sequence, so the receiver hears a
+            // carrier-style change.
             let health = sender.path_health();
-            if health.samples >= 4 {
-                let entry = adaptive.entry(endpoint.clone()).or_insert(0);
-                if *entry == 0 {
-                    if health.rtt_p99_us > ADAPT_RTT_US {
-                        *entry += 1;
-                    } else {
-                        *entry = 0;
-                    }
-                    if *entry >= 2 && sender.codec() != Codec::Opus {
-                        match sender.set_codec(Codec::Opus, Some(ADAPT_OPUS_BITRATE)) {
-                            Ok(()) => log::info!(
-                                "mesh: {endpoint} degraded (rtt p99 {:.0} ms) — switching to Opus {}",
+            let saturated = health.samples > 0 && health.loss_pct >= 40.0;
+            let no_echo = health.samples == 0 && health.sent >= 4;
+            let slow = health.samples >= 4 && health.rtt_p99_us > ADAPT_RTT_US;
+            let entry = adaptive.entry(endpoint.clone()).or_insert(0);
+            let degraded = saturated || no_echo || slow;
+            if degraded && *entry == 0 {
+                *entry = 1;
+            } else if degraded && *entry >= 1 {
+                *entry += 1;
+                if *entry >= 2 && sender.codec() != Codec::Opus {
+                    match sender.set_codec(Codec::Opus, Some(ADAPT_OPUS_BITRATE)) {
+                        Ok(()) => {
+                            log::info!(
+                                "mesh: {endpoint} degraded (rtt p99 {:.0} ms, hb loss {:.0} %) — switching to Opus {}",
                                 health.rtt_p99_us as f64 / 1000.0,
+                                health.loss_pct,
                                 ADAPT_OPUS_BITRATE
-                            ),
-                            Err(error) => log::warn!("mesh: adaptive switch failed: {error}"),
+                            );
+                            *shared.sender_codec.lock().unwrap() = Some(Codec::Opus.as_str());
+                            *restore_attempts.entry(endpoint.clone()).or_insert(0) += 1;
                         }
-                    }
-                } else {
-                    if health.rtt_p99_us <= ADAPT_HEALTHY_US {
-                        *entry += 1;
-                        if *entry - 1 >= ADAPT_BACK_TICKS && sender.codec() != codec {
-                            match sender.set_codec(codec, None) {
-                                Ok(()) => log::info!("mesh: {endpoint} recovered — restoring {}", codec.as_str()),
-                                Err(error) => log::warn!("mesh: adaptive restore failed: {error}"),
-                            }
-                            adaptive.insert(endpoint.clone(), 0);
-                        }
-                    } else {
-                        *entry = 1;
+                        Err(error) => log::warn!("mesh: adaptive switch failed: {error}"),
                     }
                 }
+            } else if !degraded && *entry > 0 {
+                let healthy = health.rtt_p99_us <= ADAPT_HEALTHY_US && health.loss_pct <= 5.0;
+                if healthy {
+                    *entry += 1;
+                    let attempts = restore_attempts.get(endpoint).copied().unwrap_or(0);
+                    let backoff = ADAPT_BACK_TICKS << attempts.min(5);
+                    if *entry - 1 >= backoff && sender.codec() != codec {
+                        match sender.set_codec(codec, None) {
+                            Ok(()) => {
+                                log::info!(
+                                    "mesh: {endpoint} recovered — restoring {}",
+                                    codec.as_str()
+                                );
+                                *shared.sender_codec.lock().unwrap() = Some(codec.as_str());
+                            }
+                            Err(error) => log::warn!("mesh: adaptive restore failed: {error}"),
+                        }
+                        adaptive.insert(endpoint.clone(), 0);
+                    }
+                } else {
+                    *entry = 1;
+                }
+            } else if !degraded {
+                *entry = 0;
             }
-            if refresh_routes {
-                // F13: Wi-Fi off->on leaves the connected socket pinned to
-                // the old route; re-pin periodically so audio returns to
-                // Wi-Fi without waiting for the user to restart.
-                sender.refresh_route();
-            }
-            let health = sender.path_health();
             if hb_counter % (crate::net::udp::HB_TICKS as u32 * 40) == 0 {
                 let (sent, lost, samples) = sender.heartbeat_counts();
                 log::debug!(
@@ -1523,7 +1559,8 @@ mod tests {
                 rtt_p99_us: 21_000,
                 loss_pct: 2.5,
                 samples: 40,
-            },
+                sent: 0,
+        },
         )]);
 
         let snapshot = build_peer_snapshot(&peers, &health);

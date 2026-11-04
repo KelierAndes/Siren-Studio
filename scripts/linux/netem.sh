@@ -27,10 +27,19 @@ set -euo pipefail
 ACTION="${1:-status}"
 
 iface_for() {
-    # apply <profile> [iface] keeps the iface in $3; clear/status in $2.
+    # apply <profile> [iface] [egress] keeps the iface in $3; clear/status in $2.
     case "$ACTION" in
         apply) echo "${3:-}" ;;
         *) echo "${2:-}" ;;
+    esac
+}
+
+# Rate profiles applied in full duplex have hung this host twice; refuse
+# them unless egress-only. Loss/delay profiles drop immediately and are safe.
+is_rate_profile() {
+    case "$1" in
+        bw1000|bw1800) return 0 ;;
+        *) return 1 ;;
     esac
 }
 
@@ -53,6 +62,7 @@ params_for() {
         delay200) echo "delay 200ms 10ms distribution normal" ;;
         jitter50) echo "delay 50ms 25ms distribution normal" ;;
         bw1800)   echo "rate 1800kbit" ;;
+        bw1000)   echo "rate 1000kbit" ;;
         *) echo "netem.sh: unknown profile '$1' (clean loss2 loss10 burst delay200 jitter50 bw1800 raw)" >&2; exit 1 ;;
     esac
 }

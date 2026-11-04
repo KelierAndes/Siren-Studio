@@ -485,3 +485,39 @@ fn wrong_password_delivers_nothing() {
     receiver.stop();
     sender.stop();
 }
+
+/// F5/E6 acceptance: capping the link below the s16 appetite must make the
+/// sender degrade to Opus; once the cap lifts and the path is healthy for
+/// 30 s, it restores the configured codec. Both nodes adapt independently.
+#[test]
+fn adaptive_codec_degrades_under_bandwidth_cap() {
+    let mesh = build_pair_inner(SendCodec::Raw, None);
+    wait_secs(1); // audio flowing
+
+    // Raw f32 needs ~3.1 Mbps; cap to 1 Mbps — 65 % of audio datagrams must
+    // not fit, heartbeats stall, and the adaptive controller fires.
+    mesh.forward.set_profile(LinkProfile {
+        bandwidth_kbps: Some(1000.0),
+        ..LinkProfile::default()
+    });
+    // The controller degrades after 2 degraded ticks (~1 s of saturation);
+    // allow generous slack for heartbeat pacing.
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let mut degraded = false;
+    while std::time::Instant::now() < deadline {
+        if mesh.sender.snapshot().sender.codec == "opus" {
+            degraded = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    assert!(degraded, "sender must degrade to Opus under bandwidth cap");
+
+    // Restore path is verified on the real rig: the in-memory proxy is a
+    // one-way forwarder, so heartbeat echoes loop back into the target node
+    // instead of reaching the requester's heartbeat socket — the restore
+    // branch (healthy for 30 s -> s16) has no measurable input here. Real
+    // network heartbeats are round-trip verified (RTT 5-20 ms in the
+    // netem matrices).
+    mesh.forward.set_profile(LinkProfile::default());
+}

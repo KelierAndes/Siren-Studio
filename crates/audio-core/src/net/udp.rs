@@ -102,6 +102,8 @@ pub struct UdpSender {
     hb_pending: Option<u64>,
     hb_sent: u64,
     hb_lost: u64,
+    /// Outcome ring of the last 32 heartbeats (true = echoed in time).
+    hb_outcomes: std::collections::VecDeque<bool>,
 }
 
 /// One shared encoder/sequence per node. Dual-stack sends the *same* encoded
@@ -264,6 +266,7 @@ impl UdpSender {
             hb_pending: None,
             hb_sent: 0,
             hb_lost: 0,
+            hb_outcomes: std::collections::VecDeque::new(),
         })
     }
 
@@ -280,6 +283,7 @@ impl UdpSender {
     pub fn send_heartbeat(&mut self) {
         if self.hb_pending.take().is_some() {
             self.hb_lost += 1;
+            self.push_outcome(false);
         }
         let ts = crate::metrics::now_us();
         let mut plain = [0u8; HB_LEN];
@@ -321,6 +325,7 @@ impl UdpSender {
                         self.hb_window.pop_front();
                     }
                     self.hb_pending = None;
+                    self.push_outcome(true);
                     got = true;
                 }
             }
@@ -348,6 +353,11 @@ impl UdpSender {
         self.packer.codec()
     }
 
+    /// The sender's packer codec as a protocol string (snapshot/UI).
+    pub fn codec_str(&self) -> &'static str {
+        self.packer.codec().as_str()
+    }
+
     /// Re-pin the connected socket's route (F13): a connected UDP socket
     /// caches the route chosen at connect time, so after Wi-Fi returns the
     /// sender kept riding the old interface and the audio stayed on
@@ -361,9 +371,18 @@ impl UdpSender {
         }
     }
 
+    fn push_outcome(&mut self, answered: bool) {
+        self.hb_outcomes.push_back(answered);
+        if self.hb_outcomes.len() > 32 {
+            self.hb_outcomes.pop_front();
+        }
+    }
+
     pub fn path_health(&self) -> PathHealth {
         let window: Vec<u64> = self.hb_window.iter().copied().collect();
-        PathHealth::from_window(&window, self.hb_sent, self.hb_lost)
+        let recent_sent = self.hb_outcomes.len() as u64;
+        let recent_lost = self.hb_outcomes.iter().filter(|o| !**o).count() as u64;
+        PathHealth::from_window(&window, recent_sent, recent_lost, self.hb_sent)
     }
 
     pub fn stream_id(&self) -> u16 {
@@ -467,13 +486,17 @@ pub const HB_TICKS: u64 = 100;
 pub struct PathHealth {
     pub rtt_p50_us: u64,
     pub rtt_p99_us: u64,
-    /// Unanswered heartbeats over all sent, in percent.
+    /// Unanswered heartbeats over the recent window, in percent (F5: a
+    /// cumulative ratio takes minutes to dilute after recovery).
     pub loss_pct: f64,
     pub samples: u64,
+    /// Requests sent since the last window reset (F5: distinguishes "path
+    /// healthy" from "so saturated that no echo ever returned").
+    pub sent: u64,
 }
 
 impl PathHealth {
-    fn from_window(window: &[u64], sent: u64, lost: u64) -> Self {
+    fn from_window(window: &[u64], sent: u64, lost: u64, sent_total: u64) -> Self {
         let mut sorted = window.to_vec();
         sorted.sort_unstable();
         let pick = |q: f64| {
@@ -492,6 +515,7 @@ impl PathHealth {
                 0.0
             },
             samples: window.len() as u64,
+            sent: sent_total,
         }
     }
 }
