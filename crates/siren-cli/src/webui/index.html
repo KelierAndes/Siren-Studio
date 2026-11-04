@@ -36,7 +36,7 @@
     font: 14px/1.45 "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
-  .shell { max-width: 1180px; margin: 0 auto; padding: 22px 20px 40px; }
+  .shell { width: min(100% - 48px, 2200px); margin-inline: auto; padding: 22px 0 40px; }
 
   /* 顶栏：品牌 / 状态胶囊（含翻页箭头）/ 远端路数 */
   .topbar { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
@@ -77,15 +77,16 @@
     border: 1px solid rgba(255,255,255,.05);
   }
   .screen {
-    position: relative; height: 316px; border-radius: 16px; overflow: hidden; background: #05090d;
+    position: relative; height: clamp(240px, 38vh, 520px); border-radius: 16px; overflow: hidden; background: #05090d;
     box-shadow: inset 0 3px 10px rgba(0,0,0,.85), inset 0 -1px 0 rgba(255,255,255,.04);
     border: 1px solid rgba(255,255,255,.05);
   }
   .screen canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 
-  .rack { display: grid; grid-template-columns: 34px 1fr 1fr 444px 34px; gap: 10px; margin-top: 12px; align-items: stretch; }
-  .syscol { display: grid; grid-template-rows: 189px 66px; gap: 13px; min-width: 0; }
-  .sysrow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; min-width: 0; }
+  .rack { display: grid; grid-template-columns: 34px minmax(0, 1fr) minmax(0, 1fr) clamp(400px, 26vw, 560px) 34px; gap: 10px; margin-top: 12px; align-items: stretch; }
+  .syscol { display: grid; grid-template-rows: auto auto; gap: 13px; min-width: 0; }
+  /* 设置列窄的时候两张系统卡上下叠，避免按钮与读数被挤出卡片 */
+  .sysrow { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; min-width: 0; }
 
   .card {
     border-radius: 16px; padding: 12px 14px; min-width: 0;
@@ -118,7 +119,7 @@
   .mutebtn.muted { background: linear-gradient(180deg, var(--red), rgba(248,113,113,.7)); color: #fff; box-shadow: 0 0 12px rgba(248,113,113,.45); }
 
   /* 设备卡：单旋钮 + 电平窗 + 路径/丢帧/欠载 */
-  .dbody { display: flex; gap: 6px; margin-top: 8px; height: 200px; }
+  .dbody { display: flex; gap: 6px; margin-top: 8px; height: clamp(200px, 30vh, 330px); }
   .knobcol { width: 112px; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; }
   .knob {
     position: relative; width: 112px; height: 112px; border-radius: 50%; cursor: ns-resize; touch-action: none;
@@ -146,12 +147,12 @@
   .buf b.warm { color: var(--amber); }
   .buf b.hot { color: var(--red); }
   .buf i { font-style: normal; font-size: 9px; color: var(--muted-2); }
-  .facts { flex: 1; padding: 8px 9px; display: flex; flex-direction: column; justify-content: space-between; }
-  .fact { display: flex; align-items: baseline; gap: 6px; font-size: 9.5px; color: var(--muted-2); }
-  .fact b { margin-left: auto; font: 500 12px/1.15 var(--mono); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .facts { flex: 1; padding: 8px 9px; display: flex; flex-direction: column; justify-content: flex-start; gap: 9px; min-width: 0; }
+  .fact { display: flex; align-items: baseline; gap: 6px; font-size: 9.5px; color: var(--muted-2); min-width: 0; }
+  .fact b { margin-left: auto; font: 500 12px/1.15 var(--mono); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 0; }
 
   /* 系统卡（无旋钮） */
-  .scard { display: flex; flex-direction: column; min-width: 0; }
+  .scard { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
   .slabel { display: flex; align-items: baseline; font-size: 10px; font-weight: 700; color: var(--muted-2); margin-top: 9px; }
   .svalue { margin-left: auto; font: 500 11.5px/1 var(--mono); color: var(--muted); }
   input[type="text"] {
@@ -161,7 +162,7 @@
   }
   input[type="text"]:focus { border-color: rgba(79,209,197,.5); box-shadow: inset 0 2px 5px rgba(0,0,0,.5), 0 0 0 3px rgba(79,209,197,.1); }
   input[type="text"]:disabled, input[type="range"]:disabled { color: var(--muted); opacity: .6; }
-  .seg { display: flex; gap: 6px; margin-top: 4px; }
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
   .seg button {
     padding: 7px 11px; border-radius: 999px; font: 600 10.5px/1 inherit; cursor: pointer; white-space: nowrap;
     background: linear-gradient(180deg, var(--metal-top), var(--metal-bottom));
@@ -170,8 +171,8 @@
   }
   .seg button.active { color: #d7fff8; border-color: rgba(79,209,197,.45); background: linear-gradient(180deg, rgba(79,209,197,.22), rgba(79,209,197,.06)); }
   .seg button:disabled { opacity: .55; cursor: default; }
-  .readout { padding: 7px 9px; display: flex; flex-direction: column; justify-content: space-between; height: 48px; margin-top: 4px; }
-  .readout .fact b { font-size: 11.5px; }
+  .readout { padding: 8px 9px; display: flex; flex-direction: column; gap: 4px; height: auto; min-height: 48px; margin-top: 4px; }
+  .readout .fact b { font-size: 11.5px; flex: 0 1 auto; min-width: 0; }
   .bigbtn {
     margin-top: auto; height: 34px; border-radius: 999px; cursor: pointer; font: 700 13px/1 inherit; letter-spacing: .06em;
     border: 1px solid rgba(255,255,255,.09); color: var(--text);
@@ -215,7 +216,6 @@
   @media (max-width: 1120px) {
     .rack { grid-template-columns: 34px 1fr 1fr 34px; }
     .syscol { grid-column: 1 / -1; grid-template-rows: auto auto; }
-    .screen { height: 240px; }
     .brand, .remote { flex-basis: auto; }
   }
   @media (max-width: 720px) {
