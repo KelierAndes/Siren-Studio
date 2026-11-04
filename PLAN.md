@@ -60,9 +60,14 @@
 - 落点：`net/crypto.rs`（新）、`net/udp.rs`（收发）、`net/discovery.rs`（TXT）、`mesh.rs`（选举/发现校验）、`siren-cli`（CLI `--password`、WebUI）。
 - 验收：未持密码的节点无法注入（AEAD 拒收，link_sim 错密码 0 包）/接管（签名剥除选举凭据）；"无密码 = 降级模式 + WARN"兼容策略写入 DEVELOPMENT.md §17。
 
-## Phase 4 · 规模化与平台（按需）⬜
+## Phase 4 · 规模化与平台 ✅ 2026-11-05 核心落地
 
-F5 按链路质量选码率 + in-band FEC；F15 gossip 替代单 mDNS；F16 TXT 加 `proto`；F20 JSON schema 校验；F14 写明规模上限；F12 Android 改 UUID 版 socket + `mediaPlayback` 前台服务。
+- F5 ✅：`UdpSender::set_codec`（保 stream id+seq 中途换码）；发送循环按心跳 RTT P99 s16↔Opus48k 自适应（>400 ms 降级、健康 30 s 恢复）；Opus 编码器开 in-band FEC（预期丢包 15%，承接 E6 残余）。真机弱网复测待做。
+- F15 ✅：`GossipTable` + `GP01` 单播 gossip（每 5 s 全表广播，16 条目、30 s 有效期），mDNS 失效时网状自愈；与密码同路加密封送。
+- F16 ✅：mDNS TXT `proto=MESH_PROTO_VERSION(3)`；更高版本对端跳过 + 告警（旧版兼容）。
+- F20 ✅：`snapshot_json_contract_is_stable` 钉死 WebUI/FFI JSON 契约（hex u64、咔哒/静音/首帧 epoch/RTT 字段名）。
+- F14 ✅：DEVELOPMENT.md §18 规模上限表（64 路掩码 / BT hub 2–3 ACL / gossip 64 / 单流带宽账 / ≤6 节点建议）。
+- F12 🟨：`SirenPlaybackService`（mediaPlayback 前台服务）+ Manifest 权限已落地；**APK 真机回归待做**；channel→SPP 回退链维持（UUID-first 需 hub 注册 SDP 记录，见 §18 备注）。
 
 ## 已知风险与运维坑（来自三设备实测）
 
@@ -82,4 +87,5 @@ F5 按链路质量选码率 + in-band FEC；F15 gossip 替代单 mDNS；F16 TXT 
 - 2026-11-04（Phase 2）：冻结+渐隐（MIX1/F8）、LATE_DUPLICATE_LIMIT 收紧至 ~5 s、幽灵流载体门前移、F13 路由周期刷新、F7 克隆检测。统一验收（7×10 矩阵）：咔哒全 0、无流全 0、修剪全 0；loss2 1.99%/loss10 10.05%（分片叠加消除）；bw1800 26.7%→0%；delay200/jitter50 仍为重排主导（未排期）。见 docs/baselines/2026-11-04-phase2/。
 - 2026-11-04：Phase 0 完成。基线要点（真实 Wi-Fi，PC↔NAS）：clean 0% 丢包；loss2 实测 ~4%（netem 2% 配置 ×2 待校准）；**delay200/jitter50 的高"丢包"（43%/67%）主要来自 netem 抖动重排 + 接收端无重排容忍窗口**（jitter50 欠载 1278/重置 407——这是 F2/F5 的直接靶子）；bw1800 欠载 3816。NAS 已部署新二进制（心跳/咔哒生效）。
 - 2026-11-04（Phase 2.5 建档）：1 小时六阶段采集完成，暴露 12 项异常（`out/2026-11-04_1h/FINDINGS.md`、复核 `VERIFICATION.md`）。关键量化：手机侧一次修剪扔 751.6 ms（fill 851.6 ms，目标是 100 ms）且 80 ms 内连发 3 次；手机 12 min 内蓝牙拨号 470 次全失败（无退避）；发送端起播前持续发全零 8.0–8.3 s；手机上行 `EAGAIN` 与双向 1.1 s 空洞同时发生（T1 两次，四个 4 分钟阶段为 0）；`rate 2mbit` 下水位塌到 0、5 分钟 209.6 s 无声。排期见 Phase 2.5（E0–E8）。
+- 2026-11-05（Phase 4）：F5/F15/F16/F20/F14 落地、F12 前台服务落地（APK 真机回归待做）；NAS 部署后 clean 双向 0 丢包、loss2 1.7–2.7%、自适应未误触发。
 - 2026-11-04（Phase 2.5+3 执行）：E0（采集加固）/E1（修剪限速 ≤60ms·≥200ms）/E2（全零不上行 + silent_ms）/E3（拨号指数退避，470 次→≤10 次）/E4（IP 回填 + TTL 30s + 失败重发现 + 旧流 3s 退役）/E7（首帧 epoch）落地；E6 以 s16 默认化解；E5/E8 待真机。Phase 3 F6 核心落地（AEAD + 选举签名 + WebUI 绑定，蓝牙载体未加密，评审待开）。
