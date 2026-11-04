@@ -59,6 +59,26 @@ void main() {
     });
   }
 
+  testWidgets('ADV + 均衡 两个开关同时打开的形态', (tester) async {
+    tester.view.physicalSize = const Size(1600, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final model = TantrumModel()
+      ..advanced = true
+      ..screenMode = 1;
+    await tester.pumpWidget(MaterialApp(home: TantrumPage(model: model)));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(TantrumEqGraph), findsOneWidget);
+    expect(find.byType(TantrumFader), findsNWidgets(4));
+    expect(tester.takeException(), isNull);
+    await expectLater(
+      find.byType(TantrumPage),
+      matchesGoldenFile('goldens/tantrum_adv_eq_on.png'),
+    );
+  });
+
   testWidgets('ADV 开关把右格栅换成四推子', (tester) async {
     tester.view.physicalSize = const Size(1600, 900);
     tester.view.devicePixelRatio = 1;

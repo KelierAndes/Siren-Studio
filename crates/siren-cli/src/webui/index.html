@@ -703,6 +703,9 @@ function render() {
     ? (pages > 1 ? `组网中 · ${devices} 台　·　${state.page + 1}/${pages}` : `组网中 · ${devices} 台`)
     : s.starting ? "加入中…" : "未组网";
   $("#remoteCount").textContent = origins.size + " 路远端";
+  // E2: 本机采集静音抑制时明示"源静音"，别让满水位全零假健康骗过使用者。
+  const silentTx = Number(snap.sender?.silent_ms) || 0;
+  $("#remoteCount").textContent += silentTx > 0 ? " · 源静音" : "";
   $("#version").textContent = "SIRENSTUDIO · LINUX WEBUI · v" + (s.version || "");
 
   const banner = $("#banner");

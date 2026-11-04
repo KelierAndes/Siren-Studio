@@ -84,7 +84,9 @@ pub fn run(args: CenterArgs) -> Result<()> {
             live_target_ms: None,
             mix_tap: None,
             bt_exempt_ports: Vec::new(),
-            key: None,
+            key: args.password.as_ref().map(|pw| {
+                std::sync::Arc::new(audio_core::net::crypto::MeshKey::from_password(pw))
+            }),
             gossip: None,
         },
         mixer_control,

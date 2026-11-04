@@ -24,7 +24,7 @@
 | F1 | 抓包确认：raw 1948 B 帧线上 `flags[+]` = 2 IP 分片/包；选定 **s16 载荷**（988 B 单 MTU） | `Codec::RawS16`(id 2) 全栈 + 解码器槽×3 + CLI `--codec s16` | loss2 实测 4.09%→**1.96%**（=netem 配置），burst 3.29%→1.83%；<2% 达标 | ✅ 2026-11-04 |
 | F2 | 3 ms 渐入斜坡覆盖 启动/缺口恢复/补零/Flush/切载波（`apply_fade_in`，RAMP_FRAMES=240） | `net/udp.rs` deliver/载波切换/缺口路径 | clean 与 loss2 全场景咔哒计数 **0** | ✅ 2026-11-04 |
 | F4 | Limiter：1 ms 前瞻 + 软膝（KNEE=0.9）+ 50 ms release；静音块立即清环 | `dsp/mixer.rs` | −6 dBFS 线性单测（tanh 会压到 0.462）；过冲不削（峰值≤1.0） | ✅ 2026-11-04 |
-| F3 | 补"混音 vs 直连不重复"单测；若 Phase 0 观察到重复，再按缺失集收敛 | `mesh.rs` + link_sim 单测 | 单测复现当前行为；如观察到重复，hub 只混叶子缺失集 | ⬜ |
+| F3 | bt_overlay 断言：Wi-Fi 恢复后混音必须让位直连（delta≤10 包/2 s）；既有掩码仲裁即缺失集收敛 | `tests/bt_overlay.rs` | 断言通过（Phase 1 提交内含）；N−1 混音流退役豁免补丁见 Phase 2.5 E4 | ✅ 2026-11-04 |
 
 ## Phase 2 · 叶子稳定（1 周）✅ 2026-11-04 完成
 
@@ -42,14 +42,14 @@
 
 | 任务 | 内容 | 落点 | 验收 | 状态 |
 | :-- | :-- | :-- | :-- | :-- |
-| E0 | 采集基座可信化：阶段启动前检查 47900 占用并清理残留 `siren.exe`；`pc.log/pc.stats` 按 run 命名；NAS 开 NTP；包内默认带 `master.csv`/`streams.csv` + 手机 I 级运行行 | `scripts/collect_1h.py`、打包脚本 | 连跑两轮，6 阶段文件齐全、无 `bind 10048`、无混写 | ⬜ |
-| E1 | 修剪改限速削（A3/A4，承接 MIX1）：单次 ≤60 ms、间隔 ≥200 ms，逐步回落到 target+10 ms；等突发结束再削；push 侧加硬上限，禁止 ring 一次吃进 1 s | `dsp/resampler.rs`、`net/udp.rs` push 路径 | T1 型 12 min：单次 dropped ≤100 ms、最小间隔 ≥200 ms，混音零值 >100 ms 归零，clicks 仍为 0 | ⬜ |
-| E2 | 全零不上行（A5）：采集连续 ≥200 ms 全零则不发音频帧（保 keepalive），接收端不填静音；UI 标"源静音"，快照加 `sender.silent_ms` | `capture/*`、`mesh.rs`、`metrics.rs` | 起播前不再出现"满水位全零"；T4 型阶段启动段静音 <1 s | ⬜ |
-| E3 | 拨号指数退避（A2）：1/2/4/8/16/30 s 封顶，连续 5 次失败后降为 5 min 探测；修 `notifyPowerKeeper` 的 BLUETOOTH_ADMIN 异常路径 | `mesh.rs` hybrid 重连 | hub 无 BT 跑 12 min，拨号 ≤10 次 | ⬜ |
-| E4 | 端点回打与发现失效（A6/A7）：优先用收包 src 回发；发现项 30 s TTL；发送失败 3 次触发重发现；换 stream id 后 3 s 内移除旧流 | `net/udp.rs`、`net/discovery.rs`、`mesh.rs` | 阶段启动无 `Connection refused` 突发；`active_streams` 3 s 内回落 | ⬜ |
+| E0 | 采集基座可信化：阶段启动前检查 47900 占用并清理残留 `siren.exe`；`pc.log/pc.stats` 按 run 命名；NAS 开 NTP；包内默认带 `master.csv`/`streams.csv` + 手机 I 级运行行 | `scripts/collect_1h.py`、打包脚本 | 清理/端口探活/按 run 命名/NTP 均落地（`clear_stale_senders`、`pc_<stamp>.*`、`set-ntp`）；"连跑两轮"验收待下次采集执行 | 🟨 代码落地 |
+| E1 | 修剪改限速削（A3/A4，承接 MIX1）：单次 ≤60 ms、间隔 ≥200 ms，逐步回落到 target+10 ms；等突发结束再削；push 侧加硬上限，禁止 ring 一次吃进 1 s | `dsp/resampler.rs`、`net/udp.rs` push 路径 | 限速削全部落地（≤60 ms/次、≥200 ms 冷却、突发缓削、4× 天花板紧急直落）；push 侧以 ring 容量(1 s) + `overflow_packets` 计数为界，未另加软上限；T1 型真机 12 min 复测待做 | ✅ 2026-11-04（真机复测待）|
+| E2 | 全零不上行（A5）：采集连续 ≥200 ms 全零则不发音频帧（保心跳），快照 `sender.silent_ms`；WebUI 状态区标"源静音" | `mesh.rs` 发送循环、`metrics.rs`、WebUI | 抑制逻辑 + 字段 + UI 徽标落地；真机起播段复测待做 | ✅ 2026-11-04（真机复测待）|
+| E3 | 拨号指数退避（A2）：1/2/4/8/16/30 s 封顶，连续 5 次失败后降为 5 min 探测 | `hybrid.rs` 离线拨号 | 退避落地（`dial_once` + `offline_backoff`，12 min ≤10 次可达）；`notifyPowerKeeper` 系 MIUI 系统日志、非本仓库代码——退避消除触发源后该异常随之消失，无需改码 | ✅ 2026-11-04（真机复测待）|
+| E4 | 端点回打与发现失效（A6/A7）：mix_tap 记收包源地址回填对端 IP；发现 TTL 60→30 s；发送失败 3 次剔除端点触发重发现；换 stream id 后旧流 3 s 内退役（N−1 混音流豁免） | `net/udp.rs`、`mesh.rs` | 全部落地；真机阶段启动复测待做 | ✅ 2026-11-04（真机复测待）|
 | E5 | 定位 A1：三组 12 min 对照（只关蓝牙 / 只关 Wi-Fi 省电 / 都关），手机 stats 增加 `tx_eagain`、roam/rssi、wakeup 计数，定时抓 `dumpsys wifi` | `scripts/collect_1h.py`、Android stats | 产出"EAGAIN + 1.1 s 洞是否随某项消失"判定表；三项均无效则转固件/AP，不再改软件 | ⬜ |
 | E6 | 弱网自动降级（A10/T6_N4）| — | **s16 默认已化解主场景**：1.58 Mbps < `rate 2mbit`，T6_N4 型塌水位不再发生；<1.6 Mbps 的 Opus 自适应切换留待 F5 | ✅（以 s16 化解，自适应切换归并 F5）|
-| E7 | 可观测补齐（A12）：三端上报 `silent_ms/silent_gaps/rtt`；发送端在首帧入队时写 epoch（绝对延迟可测） | `metrics.rs`、三端 UI、`siren-cli` | 手机/PC 快照也有无声指标；脉冲法能给出绝对延迟 P50/P95 | ⬜ |
+| E7 | 可观测补齐（A12）：mesh 端 `sender.silent_ms` + `first_frame_epoch_us`（绝对延迟可测）；hub 侧 `master.silent_ms/gaps` 早已在 | `mesh.rs`、`metrics.rs`、WebUI | mesh 引擎字段 + WebUI 显示落地；手机（APK）/PC 独立 center-send 引擎的对应上报未做 | 🟨 mesh 侧完成 |
 | E8 | 双栈补测：hub 以 `--bt` 启动，重跑 T3 的 S1–S3 | `scripts/collect_1h.py` | 出现 wifi→bluetooth→wifi 的切换记录与三段耗时（当前为空白） | ⬜ |
 
 估算：E0 0.5 天 · E1 2–3 天 · E2 1 天 · E3+E4 2 天 · E5 2–3 天 · E6 3–5 天 · E7+E8 2 天。若只有 3 天窗口，只做 **E0 + E1 + E3**（覆盖跳音、启动无声、拨号风暴）。

@@ -73,6 +73,7 @@ class TantrumTokens {
         height: 1.0,
         letterSpacing: 1.05 * s,
         fontWeight: FontWeight.w700,
+        decoration: TextDecoration.none,
         color: color,
       );
 
@@ -83,6 +84,7 @@ class TantrumTokens {
         height: 1.0,
         letterSpacing: 0.4 * s,
         fontWeight: FontWeight.w600,
+        decoration: TextDecoration.none,
         color: color,
       );
 
@@ -93,6 +95,7 @@ class TantrumTokens {
         height: 1.0,
         letterSpacing: 0.2 * s,
         fontWeight: FontWeight.w700,
+        decoration: TextDecoration.none,
         color: accent,
       );
 
@@ -103,6 +106,7 @@ class TantrumTokens {
         height: 1.0,
         letterSpacing: 2.4 * s,
         fontWeight: FontWeight.w700,
+        decoration: TextDecoration.none,
         color: inkOnDark,
       );
 
@@ -113,6 +117,7 @@ class TantrumTokens {
         height: 1.0,
         letterSpacing: 1.1 * s,
         fontWeight: FontWeight.w600,
+        decoration: TextDecoration.none,
         color: inkOnDark,
       );
 }
