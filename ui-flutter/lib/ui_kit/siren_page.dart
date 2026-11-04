@@ -5,11 +5,15 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../app_model.dart';
+import '../rust_api.dart';
 import 'controls.dart';
 import 'device.dart';
 import 'mobile_device.dart';
 import 'siren_binding.dart';
 import 'theme.dart';
+
+/// 标题栏版本号取自 Rust 核心的 CARGO_PKG_VERSION，避免界面与包版本不同步。
+final String _titleVersion = 'v${rust.version()}';
 
 /// Siren host for the BASSMAKER-derived hardware panel.
 /// Windows renders the desktop chassis; Android renders the phone layout.
@@ -206,7 +210,7 @@ class _CaptionBarState extends State<_CaptionBar> {
                     style: NeuType.chrome(8.5, p.inkFaint, tracking: 2.6, w: FontWeight.w700),
                   ),
                   const SizedBox(width: 10),
-                  Text('v0.1', style: NeuType.chrome(10.5, p.inkFaint, tracking: 1)),
+                  Text(_titleVersion, style: NeuType.chrome(10.5, p.inkFaint, tracking: 1)),
                   const Spacer(),
                   NeuWell(
                     size: const Size(108, 26),
