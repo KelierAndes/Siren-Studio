@@ -72,6 +72,10 @@ pub struct MeshConfig {
     /// through to the receiver's carrier classification.
     #[serde(skip)]
     pub bt_exempt_ports: Vec<u16>,
+    /// F6: group password — PSK for AEAD-sealed Wi-Fi datagrams and the
+    /// election signature. None = degraded, unencrypted mode (warned).
+    #[serde(skip)]
+    pub password: Option<String>,
     /// Stable node identity. `None` falls back to `SIREN_NODE_ID`, then to the
     /// id persisted for this machine, then to a fresh random id.
     pub node_id: Option<String>,
@@ -105,6 +109,7 @@ impl Default for MeshConfig {
             node_id: None,
             record: None,
             bt_exempt_ports: Vec::new(),
+            password: None,
         }
     }
 }
@@ -207,6 +212,11 @@ pub struct MeshSenderStats {
     /// Level of the frames actually handed to the network, after echo
     /// cancellation — the number to watch for loop leakage.
     pub tx_rms_db: f64,
+    /// E2: how long the capture has been silent enough to suppress the
+    /// audio uplink (keeps flowing via heartbeats only).
+    pub silent_ms: u64,
+    /// E7/A11: unix us when the first audible capture frame was queued.
+    pub first_frame_epoch_us: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -251,6 +261,11 @@ struct MeshShared {
     health: Mutex<HashMap<String, crate::net::udp::PathHealth>>,
     /// F7: warned about a duplicate uid this session.
     clone_warned: Mutex<bool>,
+    /// E2: total time the capture was silent enough to suppress uplink (ms).
+    silent_tx_ms: AtomicU64,
+    /// E7/A11: unix us of the first audible captured frame — absolute
+    /// end-to-end latency becomes measurable against the receiver's clock.
+    first_frame_epoch_us: AtomicU64,
     /// Latest decoded audio per origin; the hub builds N-1 mixes from it.
     mix_tap: Arc<crate::net::udp::MixTap>,
     /// Set when this node currently acts as the Bluetooth hub.
@@ -390,6 +405,8 @@ impl MeshEngine {
             peers: Mutex::new(Vec::new()),
             health: Mutex::new(HashMap::new()),
             clone_warned: Mutex::new(false),
+            silent_tx_ms: AtomicU64::new(0),
+            first_frame_epoch_us: AtomicU64::new(0),
             topology: Arc::new(Mutex::new(Vec::new())),
             tunnel: Mutex::new(None),
             bt: Mutex::new(BtStatus {
@@ -453,6 +470,7 @@ impl MeshEngine {
             bt_channel: config.bt_channel,
             mix_tap: Some(mix_tap),
             bt_exempt_ports: config.bt_exempt_ports.clone(),
+            password: config.password.clone(),
         })?;
 
         let bind = center.bind_addr();
@@ -537,6 +555,8 @@ impl MeshEngine {
                 capture_read_errors: errors,
                 capture_buffer_frames: self.shared.capture_buffer.load(Ordering::Relaxed),
                 tx_rms_db: f32::from_bits(self.shared.tx_rms_db.load(Ordering::Relaxed)) as f64,
+                silent_ms: self.shared.silent_tx_ms.load(Ordering::Relaxed),
+                first_frame_epoch_us: self.shared.first_frame_epoch_us.load(Ordering::Relaxed),
             },
             center: self.center.snapshot(),
             error: self.shared.error.lock().unwrap().clone(),
@@ -634,7 +654,7 @@ struct SendPeer {
 
 /// How long a node may stay absent from mDNS scans before we stop sending to
 /// its last known address.
-const PEER_KEEPALIVE_TOLERANCE: Duration = Duration::from_secs(60);
+const PEER_KEEPALIVE_TOLERANCE: Duration = Duration::from_secs(30);
 /// A peer younger than this is fresh enough to show in the UI peer list; older
 /// entries keep being sent to but are no longer advertised as online.
 const PEER_UI_FRESHNESS: Duration = Duration::from_secs(6);
@@ -686,6 +706,13 @@ fn run_mesh_sender(
         let peers = peers.clone();
         let stop_flag = shared.stop.clone();
         let topology = shared.topology.clone();
+        // F6: when a group password is set, election credentials (bit/bt)
+        // from peers whose signature does not verify are stripped — a
+        // passwordless node cannot take over the hub election.
+        let election_key = config
+            .password
+            .as_ref()
+            .map(|pw| crate::net::crypto::MeshKey::from_password(pw));
         let _ = std::thread::Builder::new()
             .name("siren-mesh-discover".into())
             .spawn(move || {
@@ -696,6 +723,7 @@ fn run_mesh_sender(
                     topology,
                     stop_flag,
                     config.discovery_secs,
+                    election_key,
                 );
             });
     }
@@ -740,6 +768,10 @@ fn run_mesh_sender(
     let mut total_packets: u64 = 0;
     let origin = shared.uid;
     let mut hb_counter: u32 = 0;
+    if config.password.is_none() {
+        // F6 degraded mode: no group password, traffic is plaintext.
+        log::warn!("mesh: NO group password set — running in unencrypted degraded mode (F6)");
+    }
     let mut tx_report: u64 = 0;
     let mut packer = match FramePacker::new(codec, config.frame_ms, origin) {
         Ok(packer) => packer,
@@ -780,6 +812,8 @@ fn run_mesh_sender(
     let mut mix_local: Vec<f32> = Vec::with_capacity(mix_samples * 2);
     let mut mix_encoders: HashMap<u64, FramePacker> = HashMap::new();
     let mut n1_logged = false;
+    let mut cap_zero_since: Option<Instant> = None;
+    let mut cap_zero_last = false;
 
     while !stop.load(Ordering::Relaxed) {
         let now = Instant::now();
@@ -795,8 +829,50 @@ fn run_mesh_sender(
                 shared
                     .capture_buffer
                     .store(pipe.buffered_frames(), Ordering::Relaxed);
+                // I3 at the capture point: a run of all-zero blocks means the
+                // source itself went silent, before any network or mixer is
+                // involved. Only the sender that captures can tell this apart
+                // from a mixer hole.
+                let silent = pcm.iter().all(|sample| *sample == 0.0);
+                if silent {
+                    if !cap_zero_last {
+                        cap_zero_since = Some(Instant::now());
+                    }
+                } else if cap_zero_last {
+                    if let Some(at) = cap_zero_since {
+                        let run_ms = at.elapsed().as_secs_f64() * 1000.0;
+                        if run_ms >= 5.0 {
+                            log::info!("trace: zerorun point=capture run_ms={run_ms:.1}");
+                        }
+                    }
+                    cap_zero_since = None;
+                }
+                cap_zero_last = silent;
+                if !silent {
+                    // E7: mark the first audible frame so the absolute
+                    // capture->playback latency can be measured (A11).
+                    let _ = shared.first_frame_epoch_us.compare_exchange(
+                        0,
+                        crate::metrics::now_us(),
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    );
+                }
             }
             None => tone.fill(&mut pcm),
+        }
+        // E2/A5: a source that captures pure digital silence (app not
+        // playing yet) used to stream 8 s of full-water-level zeros — every
+        // health metric green, nothing audible. After 200 ms of continuous
+        // all-zero capture, stop sending audio frames (heartbeats keep the
+        // path measured); resume on the first non-zero frame.
+        let capture_silent_200ms = cap_zero_since
+            .map(|at| at.elapsed() >= Duration::from_millis(200))
+            .unwrap_or(false);
+        if capture_silent_200ms {
+            shared
+                .silent_tx_ms
+                .fetch_add(config.frame_ms as u64, Ordering::Relaxed);
         }
 
         let power: f32 = pcm.iter().map(|sample| sample * sample).sum();
@@ -805,13 +881,46 @@ fn run_mesh_sender(
             .tx_rms_db
             .store((20.0 * rms.max(1e-6).log10()).to_bits(), Ordering::Relaxed);
 
+        // E4/A6: a peer whose IP changed (phone roaming between the AP's
+        // addresses, or a restarted node) kept receiving our audio at a dead
+        // endpoint for ~20 s. The audio we RECEIVE carries the peer's current
+        // IP — prefer it over a stale discovery entry (port stays from
+        // discovery: the incoming port is an ephemeral sender port).
+        {
+            let mut peers_now = peers.lock().unwrap();
+            for peer in peers_now.values_mut() {
+                let uid = node_uid(&peer.id);
+                if uid == 0 {
+                    continue;
+                }
+                if let Some((addr, _)) = shared.mix_tap.last_addr(uid, Duration::from_secs(5)) {
+                    if addr.ip() != peer.addr.ip() {
+                        log::info!(
+                            "mesh: peer {} moved {} -> {} (from received audio)",
+                            peer.name,
+                            peer.addr.ip(),
+                            addr.ip()
+                        );
+                        peer.addr.set_ip(addr.ip());
+                    }
+                }
+            }
+        }
+
         // Sync local senders with the current peer set.
         let current = peers.lock().unwrap().clone();
         senders.retain(|endpoint, _| current.contains_key(endpoint));
+        let mesh_key: Option<Arc<crate::net::crypto::MeshKey>> = config
+            .password
+            .as_ref()
+            .map(|pw| Arc::new(crate::net::crypto::MeshKey::from_password(pw)));
         for (endpoint, peer) in &current {
             if !senders.contains_key(endpoint) {
                 match UdpSender::new(peer.addr, codec, config.frame_ms, origin) {
-                    Ok(sender) => {
+                    Ok(mut sender) => {
+                        if let Some(key) = &mesh_key {
+                            sender.set_key(key.clone());
+                        }
                         log::info!("mesh: sending to {} ({endpoint})", peer.name);
                         senders.insert(endpoint.clone(), sender);
                     }
@@ -863,14 +972,36 @@ fn run_mesh_sender(
                 Vec::new()
             }
         };
-        if !packet.is_empty() {
-            for sender in senders.values_mut() {
+        if !packet.is_empty() && !capture_silent_200ms {
+            let mut drop_endpoints: Vec<String> = Vec::new();
+            for (endpoint, sender) in senders.iter_mut() {
                 match sender.send_packet(&packet) {
                     Ok(_) => {
                         total_packets += 1;
                     }
                     Err(error) => {
                         log::warn!("mesh: send to {} failed: {error}", sender.target());
+                        // E4: three consecutive failures usually mean the
+                        // endpoint is dead (refused / unreachable). Drop the
+                        // peer so discovery re-finds its new address; pinned
+                        // peers have nothing to re-find and stay.
+                        if sender.failures() >= 3 {
+                            let pinned = current
+                                .get(endpoint)
+                                .map(|peer| peer.pinned)
+                                .unwrap_or(false);
+                            if !pinned {
+                                drop_endpoints.push(endpoint.clone());
+                            }
+                        }
+                    }
+                }
+            }
+            if !drop_endpoints.is_empty() {
+                let mut peers_now = peers.lock().unwrap();
+                for endpoint in &drop_endpoints {
+                    if peers_now.remove(endpoint).is_some() {
+                        log::info!("mesh: dropped stale endpoint {endpoint} for rediscovery");
                     }
                 }
             }
@@ -880,7 +1011,7 @@ fn run_mesh_sender(
         // start (the running engine cannot change its uid safely).
         if hb_counter % (crate::net::udp::HB_TICKS as u32 * 10) == 0 {
             let clones = shared.mix_tap.snapshot(mix_samples, 0, Duration::from_secs(5));
-            if clones.iter().any(|(other, _, _)| *other == origin)
+            if clones.iter().any(|(other, _, _, _)| *other == origin)
                 && !*shared.clone_warned.lock().unwrap()
             {
                 *shared.clone_warned.lock().unwrap() = true;
@@ -938,7 +1069,7 @@ fn run_mesh_sender(
                             destinations.len()
                         );
                     }
-                    for (dest, _, dest_bt) in &destinations {
+                    for (dest, _, dest_bt, _) in &destinations {
                         // Only a destination that already fell back to
                         // Bluetooth needs the mix; while its Wi-Fi is healthy
                         // it receives the individual streams directly.
@@ -948,7 +1079,7 @@ fn run_mesh_sender(
                         let mut mix = local.to_vec();
                         let mut sources = 1u32;
                         let mut mask = 1u64 << (origin % 64);
-                        for (other, block, _) in &destinations {
+                        for (other, block, _, _) in &destinations {
                             if other == dest {
                                 continue;
                             }
@@ -1055,6 +1186,7 @@ fn run_discovery_loop(
     topology: Arc<Mutex<Vec<TopologyPeer>>>,
     stop: Arc<AtomicBool>,
     _interval_secs: u64,
+    election_key: Option<crate::net::crypto::MeshKey>,
 ) {
     let own_port = bind.rsplit(':').next().unwrap_or("").to_string();
     while !stop.load(Ordering::Relaxed) {
@@ -1085,6 +1217,30 @@ fn run_discovery_loop(
                             peer.bt
                         );
                     }
+                    // F6: with a group key, election credentials without a
+                    // valid signature are stripped — the peer can still send
+                    // (its audio is AEAD-gated anyway) but cannot win the
+                    // hub election or advertise a dial target.
+                    let (bit, bt, bt_channel) = match &election_key {
+                        Some(key) => {
+                            let valid = peer.sig.as_deref().is_some_and(|sig| {
+                                key.verify_election(&peer.id, peer.bit, peer.bt.as_deref(), peer.bt_channel, sig)
+                            });
+                            if valid {
+                                (peer.bit, peer.bt.clone(), peer.bt_channel)
+                            } else {
+                                if peer.bt.is_some() || peer.bit.is_some() {
+                                    log::warn!(
+                                        "mesh: peer {} ({}) has unsigned/invalid election credentials — ignored",
+                                        peer.name,
+                                        peer.id
+                                    );
+                                }
+                                (None, None, None)
+                            }
+                        }
+                        None => (peer.bit, peer.bt.clone(), peer.bt_channel),
+                    };
                     if let Ok(addr) = resolve_ipv4(&endpoint) {
                         map.insert(
                             key,
@@ -1092,8 +1248,8 @@ fn run_discovery_loop(
                                 name: peer.name.clone(),
                                 id: peer.id.clone(),
                                 addr,
-                                bit: peer.bit,
-                                bt: peer.bt.clone(),
+                                bit,
+                                bt: bt.clone(),
                                 pinned: false,
                                 last_seen: Instant::now(),
                             },
@@ -1104,9 +1260,9 @@ fn run_discovery_loop(
                         id: peer.id.clone(),
                         uid: node_uid(&peer.id),
                         endpoint,
-                        bit: peer.bit,
-                        bt: peer.bt.clone(),
-                        bt_channel: peer.bt_channel,
+                        bit,
+                        bt,
+                        bt_channel,
                     });
                 }
                 seen_topology.sort_by(|a, b| a.id.cmp(&b.id));

@@ -26,6 +26,9 @@ pub struct CenterArgs {
     /// Jitter-buffer target per stream, in milliseconds.
     #[arg(long, default_value_t = 30.0)]
     pub target_ms: f32,
+    /// F6: group password (AEAD-sealed datagrams).
+    #[arg(long)]
+    pub password: Option<String>,
     #[arg(long, default_value_t = 32)]
     pub max_streams: usize,
     /// Record the mix to a 32-bit float WAV instead of playing it.
@@ -81,6 +84,7 @@ pub fn run(args: CenterArgs) -> Result<()> {
             live_target_ms: None,
             mix_tap: None,
             bt_exempt_ports: Vec::new(),
+            key: None,
         },
         mixer_control,
     )?;

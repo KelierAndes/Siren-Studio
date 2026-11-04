@@ -25,9 +25,14 @@ use crate::util;
 
 #[derive(clap::Args, Debug)]
 pub struct WebArgs {
-    /// Address for the control panel, e.g. `0.0.0.0:8080`.
-    #[arg(long, default_value = "0.0.0.0:8080")]
+    /// Address for the control panel. F6: defaults to loopback — exposing
+    /// the (unauthenticated) control plane to the LAN is an explicit choice.
+    #[arg(long, default_value = "127.0.0.1:8080")]
     pub listen: String,
+    /// F6: group password — seals every Wi-Fi datagram (AEAD) and signs
+    /// election credentials. Nodes without it cannot join or take over.
+    #[arg(long)]
+    pub password: Option<String>,
     /// Join the mesh immediately with the initial settings.
     #[arg(long)]
     pub autostart: bool,
@@ -185,11 +190,17 @@ struct Inner {
     starting: bool,
     error: Option<String>,
     config: UiConfig,
+    /// F6: group password (server-side only; UiConfig goes to the browser).
+    password: Option<String>,
 }
 
-fn start_engine(config: &UiConfig) -> Result<HybridNode, String> {
+fn start_engine(config: &UiConfig, password: Option<&str>) -> Result<HybridNode, String> {
+    // F6: the group password lives server-side (Inner), never in UiConfig
+    // which is serialized out to the browser page.
+    let mut mesh = config.to_mesh_config();
+    mesh.password = password.map(str::to_string);
     HybridNode::start(
-        config.to_mesh_config(),
+        mesh,
         HybridOptions {
             config: config.to_hybrid_config(),
             transport: None,
@@ -295,8 +306,12 @@ async fn start(State(state): State<Arc<WebState>>, Json(config): Json<UiConfig>)
         inner.config = config.clone();
     }
 
+    let start_password = state.inner.lock().unwrap().password.clone();
     let start_config = config.clone();
-    let result = tokio::task::spawn_blocking(move || start_engine(&start_config)).await;
+    let result = tokio::task::spawn_blocking(move || {
+        start_engine(&start_config, start_password.as_deref())
+    })
+    .await;
 
     let mut inner = state.inner.lock().unwrap();
     inner.starting = false;
@@ -441,6 +456,7 @@ pub fn run(args: WebArgs) -> anyhow::Result<()> {
         isolation: isolation_view,
         output_sink,
         inner: Mutex::new(Inner {
+            password: args.password.clone(),
             node: None,
             starting: false,
             error: None,
@@ -452,7 +468,8 @@ pub fn run(args: WebArgs) -> anyhow::Result<()> {
 
     if args.autostart {
         println!("joining mesh with the initial settings…");
-        match start_engine(&initial) {
+        let boot_password = args.password.clone();
+        match start_engine(&initial, boot_password.as_deref()) {
             Ok(node) => state.inner.lock().unwrap().node = Some(node),
             Err(error) => {
                 eprintln!("warning: initial mesh start failed: {error}");
@@ -492,8 +509,11 @@ pub fn run(args: WebArgs) -> anyhow::Result<()> {
                     inner.node.take()
                 };
                 drop(dead_node);
-                let config = heal.inner.lock().unwrap().config.clone();
-                match start_engine(&config) {
+                let (config, heal_password) = {
+                    let inner = heal.inner.lock().unwrap();
+                    (inner.config.clone(), inner.password.clone())
+                };
+                match start_engine(&config, heal_password.as_deref()) {
                     Ok(node) => {
                         let mut inner = heal.inner.lock().unwrap();
                         inner.node = Some(node);

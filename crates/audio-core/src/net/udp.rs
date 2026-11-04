@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use rtrb::Producer;
 
+use super::crypto::MeshKey;
 use super::codec::{AudioDecoder, AudioEncoder};
 use crate::dsp::spectrum::SpectrumAnalyzer;
 use crate::dsp::{MixerControl, StreamChannel};
@@ -89,6 +90,8 @@ pub struct UdpSender {
     fail_streak: u32,
     dead_until: Option<Instant>,
     last_fail_log: Option<Instant>,
+    // F6: group key; sealed datagrams cost 31 B (magic+ver+nonce+tag).
+    key: Option<Arc<MeshKey>>,
     // Heartbeat (F10): request every HB_TICKS ticks. It rides its own
     // **unconnected** socket: a multi-homed peer answers from whichever
     // address its route picks, and a connected socket silently drops that
@@ -239,6 +242,7 @@ impl UdpSender {
             fail_streak: 0,
             dead_until: None,
             last_fail_log: None,
+            key: None,
             hb_window: std::collections::VecDeque::new(),
             hb_pending: None,
             hb_sent: 0,
@@ -261,11 +265,17 @@ impl UdpSender {
             self.hb_lost += 1;
         }
         let ts = crate::metrics::now_us();
-        let mut buf = [0u8; HB_LEN];
-        buf[..4].copy_from_slice(&HB_MAGIC);
-        buf[4..12].copy_from_slice(&ts.to_le_bytes());
-        buf[12] = HB_REQUEST;
-        if self.hb_socket.send_to(&buf, self.target).is_ok() {
+        let mut plain = [0u8; HB_LEN];
+        plain[..4].copy_from_slice(&HB_MAGIC);
+        plain[4..12].copy_from_slice(&ts.to_le_bytes());
+        plain[12] = HB_REQUEST;
+        let sent = match &self.key {
+            Some(key) => key.seal(&plain).and_then(|sealed| {
+                self.hb_socket.send_to(&sealed, self.target).map_err(Into::into)
+            }),
+            None => self.hb_socket.send_to(&plain, self.target).map_err(Into::into),
+        };
+        if sent.is_ok() {
             self.hb_pending = Some(ts);
             self.hb_sent += 1;
         }
@@ -277,8 +287,17 @@ impl UdpSender {
         let mut got = false;
         let mut buf = [0u8; HB_LEN];
         while let Ok((len, _from)) = self.hb_socket.recv_from(&mut buf) {
-            if len >= HB_LEN && buf[..4] == HB_MAGIC && buf[12] == HB_ECHO {
-                let ts = u64::from_le_bytes(buf[4..12].try_into().unwrap_or([0; 8]));
+            // F6: echoes arrive sealed like every other datagram.
+            let plain = match &self.key {
+                Some(key) => match key.open(&buf[..len]) {
+                    Some(plain) => plain,
+                    None => continue,
+                },
+                None => buf[..len].to_vec(),
+            };
+            let len = plain.len();
+            if len >= HB_LEN && plain[..4] == HB_MAGIC && plain[12] == HB_ECHO {
+                let ts = u64::from_le_bytes(plain[4..12].try_into().unwrap_or([0; 8]));
                 if self.hb_pending.map(|pending| pending == ts).unwrap_or(false) {
                     self.hb_window.push_back(crate::metrics::now_us().saturating_sub(ts));
                     if self.hb_window.len() > 32 {
@@ -298,6 +317,11 @@ impl UdpSender {
     }
 
     /// Current rolling health of this path (zeros until samples exist).
+    /// F6: enable AEAD sealing for every datagram this sender emits.
+    pub fn set_key(&mut self, key: Arc<MeshKey>) {
+        self.key = Some(key);
+    }
+
     /// Re-pin the connected socket's route (F13): a connected UDP socket
     /// caches the route chosen at connect time, so after Wi-Fi returns the
     /// sender kept riding the old interface and the audio stayed on
@@ -341,6 +365,12 @@ impl UdpSender {
     /// every 5 ms tick; retrying 200 times a second floods the log and burns
     /// CPU on phones. After a short run of failures the socket is parked for
     /// a second and failures are reported at most once per second.
+    /// Consecutive failed sends (E4: three in a row means the endpoint is
+    /// almost certainly dead).
+    pub fn failures(&self) -> u32 {
+        self.fail_streak
+    }
+
     pub fn send_packet(&mut self, packet: &[u8]) -> Result<usize> {
         if let Some(at) = self.dead_until {
             if at > Instant::now() {
@@ -348,7 +378,11 @@ impl UdpSender {
             }
             self.dead_until = None;
         }
-        match self.socket.send(packet) {
+        let wire: Vec<u8> = match &self.key {
+            Some(key) => key.seal(packet)?,
+            None => packet.to_vec(),
+        };
+        match self.socket.send(&wire) {
             Ok(sent) => {
                 self.fail_streak = 0;
                 self.packets_sent += 1;
@@ -462,6 +496,15 @@ pub const CLICK_STEP: f32 = 0.5;
 
 pub use crate::format::RAMP_FRAMES;
 
+/// `Some(true)` when the buffer carries an `SE` envelope of the current
+/// protocol version, `Some(false)` when it is plain, `None` if too short.
+fn datagram_check(buf: &[u8]) -> Option<bool> {
+    if buf.len() < 3 {
+        return None;
+    }
+    Some(buf[..2] == crate::net::crypto::CRYPTO_MAGIC && buf[2] == crate::net::crypto::CRYPTO_VERSION)
+}
+
 pub struct ReceiverConfig {
     pub bind: SocketAddr,
     pub target_ms: f32,
@@ -477,6 +520,9 @@ pub struct ReceiverConfig {
     /// which is what makes in-memory link simulators (whose fronts are also
     /// loopback) need this exemption. Empty in production.
     pub bt_exempt_ports: Vec<u16>,
+    /// F6: group-password key. When set, only `SE`-sealed datagrams are
+    /// accepted (plain frames are treated as injection attempts).
+    pub key: Option<Arc<MeshKey>>,
 }
 
 /// Latest decoded audio per origin. A hub builds one mix per Bluetooth link
@@ -493,6 +539,9 @@ struct TapBlock {
     updated: Instant,
     /// Latest copy arrived over Bluetooth (the origin's Wi-Fi is gone).
     bt: bool,
+    /// Source address of the latest delivery (E4: the hub replies to the IP
+    /// the audio actually arrives from, not a stale discovery entry).
+    addr: SocketAddr,
 }
 
 impl MixTap {
@@ -503,7 +552,7 @@ impl MixTap {
     }
 
     /// Keep the most recent `keep` samples for one origin.
-    pub fn push(&self, origin: u64, samples: &[f32], keep: usize, bt: bool) {
+    pub fn push(&self, origin: u64, samples: &[f32], keep: usize, bt: bool, addr: SocketAddr) {
         if origin == 0 || samples.is_empty() {
             return;
         }
@@ -512,8 +561,10 @@ impl MixTap {
             samples: VecDeque::with_capacity(keep),
             updated: Instant::now(),
             bt,
+            addr,
         });
         block.bt = bt;
+        block.addr = addr;
         for &sample in samples {
             if block.samples.len() >= keep {
                 block.samples.pop_front();
@@ -529,7 +580,7 @@ impl MixTap {
         want: usize,
         exclude: u64,
         max_age: Duration,
-    ) -> Vec<(u64, Vec<f32>, bool)> {
+    ) -> Vec<(u64, Vec<f32>, bool, SocketAddr)> {
         let now = Instant::now();
         let blocks = self.blocks.lock().unwrap();
         blocks
@@ -546,9 +597,21 @@ impl MixTap {
                     *origin,
                     block.samples.iter().skip(skip).copied().collect(),
                     block.bt,
+                    block.addr,
                 )
             })
             .collect()
+    }
+
+    /// E4: the freshest source address seen for `origin`, if it arrived
+    /// within `max_age`.
+    pub fn last_addr(&self, origin: u64, max_age: Duration) -> Option<(SocketAddr, Instant)> {
+        let blocks = self.blocks.lock().unwrap();
+        let block = blocks.get(&origin)?;
+        if block.updated.elapsed() > max_age {
+            return None;
+        }
+        Some((block.addr, block.updated))
     }
 }
 
@@ -679,6 +742,7 @@ impl PeerKey {
 struct Peer {
     id: u64,
     origin: u64,
+    stream_id: u16,
     codec: Codec,
     producer: Producer<f32>,
     /// Dual-stack delivers the same frame encoded differently per carrier
@@ -712,6 +776,9 @@ struct Peer {
     ramp_remaining: usize,
     /// Timed out but kept for a fast resume (F8); cleared on the next packet.
     frozen: bool,
+    /// E4/A7: same-origin stream re-joined with a new id — this old stream
+    /// must be retired (flushed and removed) within 3 s.
+    retire_at: Option<Instant>,
     /// Rate limit for the "seq gap" evidence line: a lifetime cap hides the
     /// very stalls the switch measurement is supposed to explain.
     last_gap_log: Instant,
@@ -762,6 +829,7 @@ impl Peer {
         codec: Codec,
         tap: Option<&MixTap>,
         bt: bool,
+        addr: SocketAddr,
     ) -> Result<usize> {
         // The decoder returns a slice into its own buffer, so copy it out
         // before touching the ring producer again.
@@ -770,7 +838,7 @@ impl Peer {
             decoder.decode(payload)?.to_vec()
         };
         if let Some(tap) = tap {
-            tap.push(self.origin, &samples, MIX_TAP_SAMPLES, bt);
+            tap.push(self.origin, &samples, MIX_TAP_SAMPLES, bt, addr);
         }
         self.count_clicks(&samples);
         self.analyzer.push(&samples, &self.metrics);
@@ -913,7 +981,34 @@ fn run(
             Ok((len, addr)) => {
                 stats.datagrams.fetch_add(1, Ordering::Relaxed);
                 stats.bytes.fetch_add(len as u64, Ordering::Relaxed);
-                let datagram = &buffer[..len];
+                let datagram: Vec<u8> = if let Some(key) = &config.key {
+                    // F6: sealed datagrams only. A plain frame from the
+                    // network is an unauthenticated injection attempt.
+                    if len < 2 || datagram_check(&buffer[..len]) != Some(true) {
+                        if len >= 2 && buffer[0] == b'S' && buffer[1] == b'R' {
+                            stats.bad_packets.fetch_add(1, Ordering::Relaxed);
+                            static PLAIN_WARNED: AtomicU64 = AtomicU64::new(0);
+                            if PLAIN_WARNED.fetch_add(1, Ordering::Relaxed) < 4 {
+                                log::warn!(
+                                    "udp: rejected PLAIN datagram from {addr} (mesh is password-protected)"
+                                );
+                            }
+                        } else {
+                            stats.bad_packets.fetch_add(1, Ordering::Relaxed);
+                        }
+                        continue;
+                    }
+                    match key.open(&buffer[..len]) {
+                        Some(plain) => plain,
+                        None => {
+                            stats.bad_packets.fetch_add(1, Ordering::Relaxed);
+                            continue;
+                        }
+                    }
+                } else {
+                    buffer[..len].to_vec()
+                };
+                let len = datagram.len();
                 // Heartbeats ride on the same socket but are not frames:
                 // echo requests straight back, echoes are for the sender.
                 if len >= HB_LEN && datagram[..4] == HB_MAGIC {
@@ -926,7 +1021,7 @@ fn run(
                     }
                     continue;
                 }
-                let header = match FrameHeader::decode(datagram) {
+                let header = match FrameHeader::decode(&datagram) {
                     Ok((header, payload)) => (header, payload),
                     Err(error) => {
                         stats.bad_packets.fetch_add(1, Ordering::Relaxed);
@@ -1037,6 +1132,29 @@ fn run(
                                 header.codec.as_str(),
                                 header.origin
                             );
+                            // E4/A7: a phone that re-joins gets a new stream id
+                            // while the old stream would keep its mixer slot and
+                            // its audio in the mix. Give the old one 3 s to
+                            // drain, then retire it. The N-1 mix (0xFFF0)
+                            // legitimately coexists with the direct streams
+                            // (the mask arbitration owns that decision), so it
+                            // neither triggers nor receives retirement.
+                            for (other_key, other) in peers.iter_mut() {
+                                if *other_key != key
+                                    && header.stream_id != crate::protocol::MIX_STREAM_ID
+                                    && other.stream_id != crate::protocol::MIX_STREAM_ID
+                                    && other.origin == header.origin
+                                    && other.retire_at.is_none()
+                                {
+                                    other.retire_at = Some(Instant::now() + Duration::from_secs(3));
+                                    mixer.flush_stream(other.id);
+                                    log::info!(
+                                        "stream {} superseded by {}, retiring in 3 s",
+                                        other.id,
+                                        peer.id
+                                    );
+                                }
+                            }
                             peers.insert(key, peer);
                         }
                         Err(error) => {
@@ -1213,7 +1331,7 @@ fn run(
                 // the same gap (zero-fill) on every arrival and the buffer
                 // fills with silence.
                 peer.last_seq = Some(header.seq);
-                match peer.deliver(payload, header.codec, config.mix_tap.as_deref(), tap_bt) {
+                match peer.deliver(payload, header.codec, config.mix_tap.as_deref(), tap_bt, addr) {
                     Ok(frames) => {
                         let expected = frame_frames as usize;
                         if frames != expected {
@@ -1433,6 +1551,15 @@ fn run(
                     silent_for.as_secs_f64()
                 );
             }
+            if let Some(at) = peer.retire_at {
+                if now >= at {
+                    peer.metrics.active.store(false, Ordering::Relaxed);
+                    mixer.remove(peer.id);
+                    registry.remove(peer.id);
+                    log::info!("stream {} (superseded) retired", peer.id);
+                    return false;
+                }
+            }
             let expired = peer.frozen && silent_for >= FREEZE_GRACE;
             if expired {
                 peer.metrics.active.store(false, Ordering::Relaxed);
@@ -1503,6 +1630,7 @@ fn create_peer(
     Ok(Peer {
         id,
         origin: header.origin,
+        stream_id: header.stream_id,
         codec: header.codec,
         producer,
         decoders,
@@ -1511,6 +1639,7 @@ fn create_peer(
         last_sample: None,
         ramp_remaining: RAMP_FRAMES,
         frozen: false,
+        retire_at: None,
         metrics,
         zero_buf: vec![0.0; frames_for_ms(MAX_GAP_FILL_MS) * CHANNELS],
         bt_streak: if bt_carrier { 1 } else { 0 },
@@ -1567,6 +1696,7 @@ mod tests {
                 live_target_ms: None,
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
+                key: None,
             },
             control,
         )
@@ -1637,6 +1767,7 @@ mod tests {
                 live_target_ms: None,
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
+                key: None,
             },
             control,
         )
@@ -1689,6 +1820,7 @@ mod tests {
                 live_target_ms: None,
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
+                key: None,
             },
             control,
         )
@@ -1756,6 +1888,7 @@ mod tests {
                 live_target_ms: None,
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
+                key: None,
             },
             control,
         )
@@ -1821,16 +1954,17 @@ mod tests {
     #[test]
     fn mix_tap_keeps_newest_samples_and_excludes_destination() {
         let tap = MixTap::new();
-        tap.push(0xAA, &vec![1.0f32; 960], 960, false);
-        tap.push(0xBB, &vec![2.0f32; 960], 960, true);
+        let addr: SocketAddr = "127.0.0.1:1".parse().unwrap();
+        tap.push(0xAA, &vec![1.0f32; 960], 960, false, addr);
+        tap.push(0xBB, &vec![2.0f32; 960], 960, true, addr);
         let snapshot = tap.snapshot(960, 0xAA, Duration::from_secs(1));
         assert_eq!(snapshot.len(), 1);
         assert_eq!(snapshot[0].0, 0xBB);
-        tap.push(0xAA, &vec![3.0f32; 20], 960, false);
+        tap.push(0xAA, &vec![3.0f32; 20], 960, false, addr);
         let snapshot = tap.snapshot(960, 0, Duration::from_secs(1));
         let block = snapshot
             .iter()
-            .find(|(origin, _, _)| *origin == 0xAA)
+            .find(|(origin, _, _, _)| *origin == 0xAA)
             .expect("origin");
         assert_eq!(block.1.len(), 960);
         assert_eq!(block.1[959], 3.0);
@@ -1863,6 +1997,7 @@ mod tests {
                 live_target_ms: None,
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
+                key: None,
             },
             control,
         )
@@ -1982,6 +2117,7 @@ mod tests {
                 live_target_ms: None,
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
+                key: None,
             },
             control,
         )
@@ -2017,6 +2153,7 @@ mod tests {
                 live_target_ms: None,
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
+                key: None,
             },
             control,
         )
@@ -2095,6 +2232,7 @@ mod tests {
                 live_target_ms: None,
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
+                key: None,
             },
         )
         .unwrap();
@@ -2151,6 +2289,7 @@ mod tests {
                 live_target_ms: None,
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
+                key: None,
             },
             control,
         )
@@ -2211,6 +2350,7 @@ mod tests {
                 live_target_ms: None,
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
+                key: None,
             },
             control,
         )
@@ -2258,6 +2398,7 @@ mod tests {
                 live_target_ms: None,
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
+                key: None,
             },
             control,
         )

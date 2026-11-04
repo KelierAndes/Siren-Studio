@@ -44,12 +44,22 @@ fn reserve_port() -> u16 {
 /// Start the pair. Both nodes send the default 440 Hz tone; neither touches
 /// an audio device (`output: false` -> `CenterMode::Silent`).
 fn build_pair() -> TestMesh {
-    build_pair_with_codec(SendCodec::Raw)
+    build_pair_full(SendCodec::Raw, None)
+}
+
+/// `password` sets the group password on both nodes (F6). Pass different
+/// strings to build a mismatched pair.
+fn build_pair_full(codec: SendCodec, password: Option<&str>) -> TestMesh {
+    build_pair_inner(codec, password)
 }
 
 /// `codec` selects the Wi-Fi payload codec; S16 must deliver loss-free at
 /// roughly half the raw bandwidth (988 B frames fit one MTU).
 fn build_pair_with_codec(codec: SendCodec) -> TestMesh {
+    build_pair_inner(codec, None)
+}
+
+fn build_pair_inner(codec: SendCodec, password: Option<&str>) -> TestMesh {
     let (rx_port, tx_port, fwd_port, rev_port) = (
         reserve_port(),
         reserve_port(),
@@ -78,6 +88,7 @@ fn build_pair_with_codec(codec: SendCodec) -> TestMesh {
         // Our Wi-Fi fronts are loopback ports; without this the receiver
         // would classify their packets as the Bluetooth carrier.
         mesh_config.bt_exempt_ports = vec![fwd_port, rev_port];
+        mesh_config.password = password.map(str::to_string);
         HybridNode::start(
             mesh_config,
             HybridOptions {
@@ -382,4 +393,95 @@ fn s16_payload_halves_bandwidth_and_delivers() {
         stream.codec
     );
     assert!(stream.active);
+}
+
+/// F6 acceptance: matching passwords deliver audio.
+#[test]
+fn group_password_gates_the_mesh() {
+    let mesh = build_pair_full(SendCodec::Raw, Some("group-pass"));
+    wait_secs(2);
+
+    let stream = rx_stream(&mesh).expect("same password delivers audio");
+    assert!(stream.packets >= 300, "packets={} with matching password", stream.packets);
+}
+
+#[test]
+fn wrong_password_delivers_nothing() {
+    // Two nodes, different passwords: the receiver must reject every
+    // sealed datagram — no stream ever appears.
+    let (rx_port, tx_port, fwd_port, rev_port) = (
+        reserve_port(),
+        reserve_port(),
+        reserve_port(),
+        reserve_port(),
+    );
+    let forward = spawn_link(
+        &format!("127.0.0.1:{fwd_port}"),
+        format!("127.0.0.1:{rx_port}").parse().expect("addr"),
+        Default::default(),
+    )
+    .expect("forward link")
+    .1;
+    let _reverse = spawn_link(
+        &format!("127.0.0.1:{rev_port}"),
+        format!("127.0.0.1:{tx_port}").parse().expect("addr"),
+        Default::default(),
+    )
+    .expect("reverse link")
+    .1;
+    let node = |name: &str, id: &str, port: u16, peers: Vec<String>, password: &str| {
+        let mut mesh_config = MeshConfig::default();
+        mesh_config.bind = "127.0.0.1".into();
+        mesh_config.port = port;
+        mesh_config.name = name.into();
+        mesh_config.discovery = false;
+        mesh_config.advertise = false;
+        mesh_config.output = false;
+        mesh_config.source = SendSource::Tone;
+        mesh_config.codec = SendCodec::Raw;
+        mesh_config.frame_ms = 5;
+        mesh_config.node_id = Some(id.to_string());
+        mesh_config.static_peers = peers;
+        mesh_config.bt_exempt_ports = vec![fwd_port, rev_port];
+        mesh_config.password = Some(password.to_string());
+        HybridNode::start(
+            mesh_config,
+            HybridOptions {
+                config: HybridConfig {
+                    bt_enabled: false,
+                    ..HybridConfig::default()
+                },
+                state_path: Some(std::env::temp_dir().join(format!("siren-link-sim-{name}"))),
+                ..HybridOptions::default()
+            },
+        )
+        .expect("start node")
+    };
+    let receiver = node(
+        "sim-rx2",
+        "aaaaaaaaaaaa0001",
+        rx_port,
+        vec![format!("127.0.0.1:{rev_port}")],
+        "password-rx",
+    );
+    let sender = node(
+        "sim-tx2",
+        "aaaaaaaaaaaa0002",
+        tx_port,
+        vec![format!("127.0.0.1:{fwd_port}")],
+        "password-tx",
+    );
+    wait_secs(2);
+    let stream = receiver
+        .snapshot()
+        .center
+        .streams
+        .into_iter()
+        .find(|s| s.origin == sender.mesh().uid());
+    assert!(
+        stream.is_none() || stream.unwrap().packets == 0,
+        "a wrong password must deliver no audio"
+    );
+    receiver.stop();
+    sender.stop();
 }

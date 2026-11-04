@@ -1,0 +1,2 @@
+ts_ms,stream,fill_before_ms,fill_after_ms,target_ms,ms_since_last_trim,ratio,path,dropped_ms
+1793790512713,8703277554953411736,232.5,100.0,100,603,1.00022,wifi,132.5

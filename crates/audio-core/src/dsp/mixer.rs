@@ -3,12 +3,13 @@
 //! per-channel gain and mute are atomics so a UI thread never blocks audio.
 
 use std::sync::atomic::Ordering;
+use std::time::Instant;
 use std::sync::{Arc, Mutex};
 
 use rtrb::{Consumer, Producer};
 
 use crate::dsp::resampler::DriftResampler;
-use crate::format::{CHANNELS, SAMPLE_RATE};
+use crate::format::{ms_for_frames, CHANNELS, SAMPLE_RATE};
 use crate::metrics::{db_to_linear, store_f32, MixerMetrics, StreamMetrics};
 
 pub enum MixerCommand {
@@ -28,6 +29,8 @@ pub struct StreamChannel {
     /// Whether the last render was past the start water level; the false→true
     /// edge is the moment this stream becomes audible again.
     started_last: bool,
+    /// Last overflow trim, for the I1 interval field.
+    last_trim: Option<Instant>,
 }
 
 impl StreamChannel {
@@ -37,6 +40,7 @@ impl StreamChannel {
             rx,
             resampler: DriftResampler::new(target_ms),
             started_last: false,
+            last_trim: None,
         }
     }
 
@@ -81,6 +85,27 @@ impl StreamChannel {
         }
         if report.buffer_reset {
             self.metrics.buffer_resets.fetch_add(1, Ordering::Relaxed);
+            let since = self
+                .last_trim
+                .map(|at| at.elapsed().as_secs_f64() * 1000.0)
+                .unwrap_or(f64::NAN);
+            self.last_trim = Some(Instant::now());
+            log::info!(
+                "trace: trim stream={} fill_before_ms={:.1} fill_after_ms={:.1} target_ms={:.0} ms_since_last_trim={:.0} ratio={:.5} path={} dropped_ms={:.1}",
+                self.id(),
+                ms_for_frames(report.pre_trim_frames as usize),
+                ms_for_frames(report.fill_frames as usize),
+                f32::from_bits(self.metrics.target_ms.load(Ordering::Relaxed)),
+                since,
+                report.ratio,
+                self.metrics
+                    .path
+                    .lock()
+                    .map(|p| p.clone())
+                    .unwrap_or_else(|_| "?".into()),
+                ms_for_frames(report.pre_trim_frames as usize)
+                    - ms_for_frames(report.fill_frames as usize),
+            );
         }
         if report.started && !self.started_last {
             self.metrics.starts.fetch_add(1, Ordering::Relaxed);
@@ -205,6 +230,8 @@ pub struct Mixer {
     /// Whether the previous rendered block came out as exact digital zero; the
     /// true→false edge is one interruption, however many blocks it lasts.
     silent_last: bool,
+    /// Start of the current all-zero run, for the I3 log line.
+    silent_since: Option<Instant>,
     metrics: Arc<MixerMetrics>,
 }
 
@@ -225,6 +252,7 @@ pub fn new_mixer(max_streams: usize) -> (Mixer, MixerHandle) {
         limiter: Limiter::new(),
         target_override: None,
         silent_last: false,
+        silent_since: None,
         metrics: metrics.clone(),
     };
     (mixer, MixerHandle { tx, metrics })
@@ -397,10 +425,24 @@ impl Mixer {
                 self.metrics
                     .silent_gaps
                     .fetch_add(1, Ordering::Relaxed);
+                self.silent_since = Some(Instant::now());
                 log::debug!(
                     "mixer: digital silence starts with {active} stream(s) attached"
                 );
             }
+        } else if self.silent_last {
+            // I3: one zero run at the mixer output, as long as it lasted.
+            let run_ms = self
+                .silent_since
+                .map(|at| at.elapsed().as_secs_f64() * 1000.0)
+                .unwrap_or(0.0);
+            if run_ms >= 5.0 {
+                log::info!(
+                    "trace: zerorun point=mix run_ms={:.1} streams={active}",
+                    run_ms
+                );
+            }
+            self.silent_since = None;
         }
         self.silent_last = peak == 0.0;
 

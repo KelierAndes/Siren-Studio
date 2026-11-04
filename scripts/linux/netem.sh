@@ -6,6 +6,7 @@
 #
 # Usage (on the Linux test host):
 #   sudo ./netem.sh apply <profile> [iface]
+#   sudo ./netem.sh apply raw "<netem params>" [iface]
 #   sudo ./netem.sh clear  [iface]
 #        ./netem.sh status [iface]
 #
@@ -17,6 +18,9 @@
 #   delay200  200 ms one-way delay (+-10 ms)
 #   jitter50  50 ms delay with 25 ms jitter
 #   bw1800    1800 kbit/s ceiling (raw f32 needs ~3100 kbit/s)
+#   raw       arbitrary netem params, e.g.
+#             sudo ./netem.sh apply raw 'loss 30%'
+#             sudo ./netem.sh apply raw 'loss 3% delay 40ms 30ms rate 2mbit' enp1s0
 
 set -euo pipefail
 
@@ -41,6 +45,7 @@ fi
 
 params_for() {
     case "$1" in
+        raw)      echo "${RAW_PARAMS:-}" ;;
         clean)    echo "" ;;
         loss2)    echo "loss 2%" ;;
         loss10)   echo "loss 10%" ;;
@@ -48,7 +53,7 @@ params_for() {
         delay200) echo "delay 200ms 10ms distribution normal" ;;
         jitter50) echo "delay 50ms 25ms distribution normal" ;;
         bw1800)   echo "rate 1800kbit" ;;
-        *) echo "netem.sh: unknown profile '$1' (clean loss2 loss10 burst delay200 jitter50 bw1800)" >&2; exit 1 ;;
+        *) echo "netem.sh: unknown profile '$1' (clean loss2 loss10 burst delay200 jitter50 bw1800 raw)" >&2; exit 1 ;;
     esac
 }
 
@@ -57,6 +62,27 @@ clear_all() {
     tc qdisc del dev "$IFACE" ingress 2>/dev/null || true
     tc qdisc del dev "$IFB" root 2>/dev/null || true
     ip link set "$IFB" down 2>/dev/null || true
+}
+
+apply_raw_audio_only() {
+    # 只整 UDP 音频端口（默认 47900）：整块网卡 root netem 会把 SSH/pscp 一起
+    # 打掉，注入脚本自己断在半路，看起来像测试失败其实是控制通道断了。
+    local port="${AUDIO_PORT:-47900}"
+    tc qdisc add dev "$IFACE" root handle 1: prio
+    tc qdisc add dev "$IFACE" parent 1:3 handle 30: netem $PARAMS
+    tc filter add dev "$IFACE" parent 1: protocol ip prio 1 u32 \
+        match ip protocol 17 0xff \
+        match ip dport "$port" 0xffff flowid 1:3
+    modprobe ifb 2>/dev/null || true
+    ip link show "$IFB" >/dev/null 2>&1 || ip link add "$IFB" type ifb
+    ip link set "$IFB" up
+    tc qdisc add dev "$IFACE" handle ffff: ingress
+    tc filter add dev "$IFACE" parent ffff: protocol ip u32 \
+        match ip protocol 17 0xff \
+        match ip sport "$port" 0xffff \
+        action mirred egress redirect dev "$IFB"
+    tc qdisc add dev "$IFB" root netem $PARAMS
+    echo "netem: applied '$PARAMS' to udp/$port on $IFACE (both directions, control traffic untouched)"
 }
 
 case "$ACTION" in
@@ -71,8 +97,20 @@ case "$ACTION" in
         ;;
     apply)
         PROFILE="${2:-}"
+        if [ "$PROFILE" = "raw" ]; then
+            RAW_PARAMS="${3:-}"
+            [ -n "${4:-}" ] && IFACE="$4"
+        fi
         PARAMS="$(params_for "$PROFILE")"
         clear_all
+        if [ "$PROFILE" = "raw" ]; then
+            if [ -z "$PARAMS" ]; then
+                echo "netem.sh: raw needs params, e.g. apply raw 'loss 30%'" >&2
+                exit 1
+            fi
+            apply_raw_audio_only
+            exit 0
+        fi
         if [ -z "$PARAMS" ]; then
             echo "netem: clean (no impairment) on $IFACE"
             exit 0

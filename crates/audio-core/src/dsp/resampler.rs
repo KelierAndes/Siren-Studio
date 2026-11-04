@@ -49,6 +49,9 @@ pub struct RenderReport {
     pub started: bool,
     /// The buffer was far over target and was trimmed back.
     pub buffer_reset: bool,
+    /// Frames available *before* that trim, so the log can show how much was
+    /// thrown away (I1). Zero when no trim happened.
+    pub pre_trim_frames: u32,
 }
 
 pub struct DriftResampler {
@@ -65,6 +68,10 @@ pub struct DriftResampler {
     started: bool,
     /// Frames of output fade-in still owed after a trim (MIX1/F8).
     ramp_left: usize,
+    /// E1: last trim instant (rate limiting) and the previous fill reading
+    /// (flood detection: defer trimming while the buffer still grows).
+    last_trim: Option<std::time::Instant>,
+    last_available: usize,
 }
 
 impl DriftResampler {
@@ -84,6 +91,8 @@ impl DriftResampler {
             len_frames: 0,
             started: false,
             ramp_left: 0,
+            last_trim: None,
+            last_available: 0,
         }
     }
 
@@ -131,7 +140,21 @@ impl DriftResampler {
         let available = self.len_frames + rx.slots() / CHANNELS;
         let reset_threshold = fill_ceiling_frames(self.target_frames);
         let mut trimmed = false;
-        if self.started && available as f64 > reset_threshold {
+        let mut pre_trim_frames = 0u32;
+        // E1/A4: rate-limit the shave — one burst on the phone produced three
+        // trims in 80 ms with a single 751.6 ms drop. At most 60 ms per trim,
+        // at least 200 ms apart, and defer while the backlog is still
+        // growing. An extreme backlog (4x the ceiling) still drops straight
+        // to target: protecting the ring beats latency smoothing.
+        let still_flooding = available > self.last_available + 40;
+        self.last_available = available;
+        let emergency = available as f64 > reset_threshold * 4.0;
+        let cooling = self
+            .last_trim
+            .map(|at| at.elapsed() < std::time::Duration::from_millis(200))
+            .unwrap_or(false);
+        let trim_due = emergency || (!cooling && !still_flooding);
+        if self.started && available as f64 > reset_threshold && trim_due {
             // Drop the oldest audio down to the target. This only happens
             // after a long stall; the alternative is minutes of added latency.
             //
@@ -140,7 +163,12 @@ impl DriftResampler {
             // cost a whole block of digital silence — measured as 15–195 ms
             // holes that no underrun, loss or overflow counter reported.
             let target = self.target_frames as usize;
-            let excess = available.saturating_sub(target);
+            let excess_raw = available.saturating_sub(target);
+            let excess = if emergency {
+                excess_raw
+            } else {
+                excess_raw.min(frames_for_ms(60.0))
+            };
             let head = self.pos.floor() as usize;
             let frac = self.pos - head as f64;
             let unplayed = self.len_frames.saturating_sub(head + 1);
@@ -171,7 +199,9 @@ impl DriftResampler {
             self.integral = 0.0;
             self.fill_ema = self.target_frames;
             self.ramp_left = crate::format::RAMP_FRAMES;
+            self.last_trim = Some(std::time::Instant::now());
             trimmed = true;
+            pre_trim_frames = available as u32;
         }
         // 修剪块要报告修剪之后的水位，否则 UI 会显示一个再也不会出现的缓冲深度。
         let fill_report = if trimmed {
@@ -294,6 +324,7 @@ impl DriftResampler {
             missing_frames,
             started: self.started,
             buffer_reset: trimmed,
+            pre_trim_frames,
         }
     }
 
@@ -447,7 +478,9 @@ mod tests {
     }
 
     #[test]
-    fn trims_a_large_overflow_back_to_target() {
+    fn trims_are_rate_limited_and_stay_started() {
+        // E1/A4: one trim shaves at most 60 ms, trims are >= 200 ms apart,
+        // and the stream keeps rendering (no silent block, no re-warm).
         let (mut producer, mut consumer) = rtrb::RingBuffer::new(SAMPLE_RATE as usize * CHANNELS);
         let mut resampler = DriftResampler::new(30.0);
         let mut out = vec![0.0f32; 240 * CHANNELS];
@@ -456,26 +489,53 @@ mod tests {
         let report = resampler.render(&mut consumer, 240, 1.0, &mut out);
         assert!(report.started && !report.buffer_reset);
 
-        let flood = vec![0.1f32; frames_for_ms(200.0) * CHANNELS];
+        let flood = vec![0.1f32; frames_for_ms(400.0) * CHANNELS];
         producer.push_entire_slice(&flood).unwrap();
         let report = resampler.render(&mut consumer, 240, 1.0, &mut out);
-        assert!(report.buffer_reset);
-        // MIX1/F8: the trim must not re-warm the stream (that silence fed
-        // the trim<->underrun oscillation); it stays started at target fill.
-        assert!(report.started);
+        assert!(report.buffer_reset, "first trim fires above the ceiling");
+        assert!(report.started, "trim must not re-warm the stream");
         assert!(
-            report.fill_frames <= frames_for_ms(40.0) as u32,
-            "fill after reset {} frames",
+            report.peak > 0.05,
+            "the trimmed block must still carry audio"
+        );
+
+        // Cooldown: the next block must not trim again.
+        let report = resampler.render(&mut consumer, 240, 1.0, &mut out);
+        assert!(!report.buffer_reset, "200 ms cooldown must hold");
+
+        // Repeated trims (spaced out) bring the fill back to target without
+        // ever dropping more than ~60 ms + one block at once.
+        let target = frames_for_ms(30.0);
+        for _ in 0..24 {
+            std::thread::sleep(std::time::Duration::from_millis(210));
+            let report = resampler.render(&mut consumer, 240, 1.0, &mut out);
+            if report.fill_frames <= (target + frames_for_ms(12.0)) as u32 {
+                assert!(report.peak > 0.05, "audio keeps flowing while trimming");
+                return;
+            }
+        }
+        panic!("rate-limited trims never returned the fill to target");
+    }
+
+    #[test]
+    fn extreme_backlog_drops_to_target_immediately() {
+        // Emergency: 4x the ceiling means the ring is about to overflow;
+        // latency smoothing loses to ring protection there.
+        let (mut producer, mut consumer) = rtrb::RingBuffer::new(SAMPLE_RATE as usize * CHANNELS);
+        let mut resampler = DriftResampler::new(30.0);
+        let mut out = vec![0.0f32; 240 * CHANNELS];
+        let prefill = vec![0.1f32; frames_for_ms(30.0) * CHANNELS];
+        producer.push_entire_slice(&prefill).unwrap();
+        resampler.render(&mut consumer, 240, 1.0, &mut out);
+        let flood = vec![0.1f32; frames_for_ms(3000.0) * CHANNELS];
+        let _ = producer.push_partial_slice(&flood);
+        let report = resampler.render(&mut consumer, 240, 1.0, &mut out);
+        assert!(report.buffer_reset);
+        assert!(
+            report.fill_frames <= frames_for_ms(45.0) as u32,
+            "emergency should drop straight to target: {}",
             report.fill_frames
         );
-        // 修剪块本身必须继续出声：以前它直接返回，out 保持混音器填的 0，
-        // 于是每次修剪都是一整块数字静音（实测 15–195 ms 的洞）。
-        assert!(report.peak > 0.05, "the trimmed block must still carry audio");
-
-        // The very next block renders audio again (faded in), no warm-up gap.
-        let report = resampler.render(&mut consumer, 240, 1.0, &mut out);
-        assert!(report.started);
-        assert!(report.peak > 0.05);
     }
 
     #[test]

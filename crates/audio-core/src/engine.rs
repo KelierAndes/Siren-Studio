@@ -70,6 +70,9 @@ pub struct CenterConfig {
     /// `ReceiverConfig::bt_exempt_ports`.
     #[serde(skip)]
     pub bt_exempt_ports: Vec<u16>,
+    /// F6: group password. When set, every Wi-Fi datagram is AEAD-sealed.
+    #[serde(skip)]
+    pub password: Option<String>,
     /// Local Bluetooth adapter address advertised over mDNS.
     pub bt: Option<String>,
     /// RFCOMM channel advertised over mDNS.
@@ -95,6 +98,7 @@ impl Default for CenterConfig {
             bt_channel: None,
             mix_tap: None,
             bt_exempt_ports: Vec::new(),
+            password: None,
         }
     }
 }
@@ -201,6 +205,7 @@ impl CenterEngine {
                     live_target_ms: Some(target_ms.clone()),
                     mix_tap: config.mix_tap.clone(),
                     bt_exempt_ports: config.bt_exempt_ports.clone(),
+                    key: config.password.as_ref().map(|pw| std::sync::Arc::new(crate::net::crypto::MeshKey::from_password(pw))),
                 },
                 control.clone(),
             )?;
@@ -214,6 +219,14 @@ impl CenterEngine {
                     .as_ref()
                     .map(|receiver| receiver.local_addr.port())
                     .unwrap_or(0);
+                let election_sig = config.password.as_ref().map(|pw| {
+                    crate::net::crypto::MeshKey::from_password(pw).sign_election(
+                        &config.node_id,
+                        config.bit,
+                        config.bt.as_deref(),
+                        config.bt_channel,
+                    )
+                });
                 match discovery::advertise_full(
                     &config.role,
                     &config.name,
@@ -223,6 +236,7 @@ impl CenterEngine {
                     config.bit,
                     config.bt.as_deref(),
                     config.bt_channel,
+                    election_sig.as_deref(),
                 ) {
                     Ok(advertiser) => Some(advertiser),
                     Err(error) => {

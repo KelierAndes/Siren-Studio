@@ -568,3 +568,14 @@ python scripts/verify_e2e.py
 - FFI：`siren_begin_start_mesh / poll_start_mesh / mesh_snapshot / mesh_set_gain / mesh_set_muted / mesh_set_target_ms / mesh_set_master_gain_db / mesh_stop / mesh_release`；UI 增益/静音按当前激活的混音引擎（mesh 优先）路由。
 - Android：`MainActivity` 持有 `WifiManager.MulticastLock`（Manifest 需要 `CHANGE_WIFI_MULTICAST_STATE`，否则 SecurityException 崩溃）；Oboe 输出走 `ndk_context`，采集使用 MediaProjection + `AudioPlaybackCapture`（排除自身 UID，见防回环一节）或麦克风。
 - UI 只有组网一个面板：桌面按页翻动设备卡，手机纵向滚动；不再有中心端与发送端的配置入口。独立的中心/发送引擎仅保留在 CLI（`siren center` / `siren send`）与测试中。端口可用 `SIREN_UI_MESH_PORT` 覆盖（默认 47900，用于同机多实例测试）；`SIREN_UI_AUTOSTART=1` 会在启动后自动加入组网，来源/输出可用 `SIREN_UI_MESH_SOURCE`（tone/loopback/microphone）与 `SIREN_UI_MESH_OUTPUT`（0=静默）覆盖。
+
+## 17. 安全（F6，2026-11-04 落地，设计评审待开）
+
+组密码机制：`--password <pw>`（`siren mesh` / `siren web` / `siren center`）。**无密码 = 降级模式**，启动时打 WARN（"running in unencrypted degraded mode"），行为与历史版本完全一致（兼容策略：老节点混入不加密网络仍可互操作；上密码即全组强制加密）。
+
+- **帧加密**：PSK = SHA-256(密码)。Wi-Fi 每个 datagram 封装为 `SE | ver(1) | nonce(12) | XChaCha...ChaCha20-Poly1305(完整原帧) | tag(16)`，开销 31 B（s16 5 ms 帧 988+31 仍单 MTU）。接收端设置了密码后**拒收一切明文帧**（按注入尝试计数告警）；未设密码的节点收到 `SE` 帧直接丢弃。
+- **心跳**：与音频同路加密封送/解封。
+- **蓝牙载体**：本期不加密（v3 紧凑头载荷 ~62 B，28 B AEAD 会让空口翻倍）——文档明示蓝牙是弱载体，待后续给独立预算。
+- **选举签名**：mDNS TXT 增加 `sig = hex(HMAC-SHA256(psk, id|bit|bt|btch))`。持密码节点验证后信选举凭据；无效/缺失签名的对端**剥除 bit/bt**（可继续收发但无法当选 hub、不被拨号）——密码攻击者无法注入音频（AEAD 拒收）也无法接管选举。
+- **WebUI**：默认绑 `127.0.0.1:8080`（暴露到 LAN 需显式 `--listen`）；密码存服务端 `Inner`，不随 UiConfig 序列化到浏览器。
+- 单测：`net/crypto.rs`（封/开、错密码、防篡改、签名绑定字段）+ link_sim 端到端（同密码通、错密码 0 包）。

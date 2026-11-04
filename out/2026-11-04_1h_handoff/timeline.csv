@@ -1,0 +1,139 @@
+{"ts_ms": 1793786032042, "phase": "prep", "action": "begin"}
+{"ts_ms": 1793786065550, "phase": "prep", "action": "begin"}
+{"ts_ms": 1793786067146, "phase": "T1", "action": "phase_begin", "minutes": 12.0}
+{"ts_ms": 1793786078545, "phase": "T1", "action": "hub_started"}
+{"ts_ms": 1793786084615, "phase": "T1", "action": "pc_started", "pid": 26208}
+{"ts_ms": 1793786116664, "phase": "T1", "action": "phone_join_tapped"}
+{"ts_ms": 1793786840518, "phase": "T1", "action": "pc_stopped"}
+{"ts_ms": 1793786846379, "phase": "T1", "action": "hub_stopped"}
+{"ts_ms": 1793786848754, "phase": "T1", "action": "phase_end"}
+{"ts_ms": 1793786848756, "phase": "T3", "action": "phase_begin", "cycles": 5}
+{"ts_ms": 1793786860185, "phase": "T3", "action": "hub_started"}
+{"ts_ms": 1793786866234, "phase": "T3", "action": "pc_started", "pid": 7432}
+{"ts_ms": 1793786898395, "phase": "T3", "action": "phone_join_tapped"}
+{"ts_ms": 1793786898572, "phase": "T3", "action": "inject", "scenario": "S1", "n": 1, "how": "phone wifi off"}
+{"ts_ms": 1793786903808, "phase": "T3", "action": "clear", "scenario": "S1", "n": 1, "how": "phone wifi on"}
+{"ts_ms": 1793786912965, "phase": "T3", "action": "inject", "scenario": "S1", "n": 2, "how": "phone wifi off"}
+{"ts_ms": 1793786918110, "phase": "T3", "action": "clear", "scenario": "S1", "n": 2, "how": "phone wifi on"}
+{"ts_ms": 1793786927242, "phase": "T3", "action": "inject", "scenario": "S1", "n": 3, "how": "phone wifi off"}
+{"ts_ms": 1793786932382, "phase": "T3", "action": "clear", "scenario": "S1", "n": 3, "how": "phone wifi on"}
+{"ts_ms": 1793786941558, "phase": "T3", "action": "inject", "scenario": "S1", "n": 4, "how": "phone wifi off"}
+{"ts_ms": 1793786946699, "phase": "T3", "action": "clear", "scenario": "S1", "n": 4, "how": "phone wifi on"}
+{"ts_ms": 1793786955834, "phase": "T3", "action": "inject", "scenario": "S1", "n": 5, "how": "phone wifi off"}
+{"ts_ms": 1793786960972, "phase": "T3", "action": "clear", "scenario": "S1", "n": 5, "how": "phone wifi on"}
+{"ts_ms": 1793786970720, "phase": "T3", "action": "inject", "scenario": "S2", "n": 1, "params": "loss 30%"}
+{"ts_ms": 1793786976199, "phase": "T3", "action": "clear", "scenario": "S2", "n": 1}
+{"ts_ms": 1793786985676, "phase": "T3", "action": "inject", "scenario": "S2", "n": 2, "params": "loss 30%"}
+{"ts_ms": 1793786991177, "phase": "T3", "action": "clear", "scenario": "S2", "n": 2}
+{"ts_ms": 1793787000680, "phase": "T3", "action": "inject", "scenario": "S2", "n": 3, "params": "loss 30%"}
+{"ts_ms": 1793787006188, "phase": "T3", "action": "clear", "scenario": "S2", "n": 3}
+{"ts_ms": 1793787015645, "phase": "T3", "action": "inject", "scenario": "S2", "n": 4, "params": "loss 30%"}
+{"ts_ms": 1793787021110, "phase": "T3", "action": "clear", "scenario": "S2", "n": 4}
+{"ts_ms": 1793787030574, "phase": "T3", "action": "inject", "scenario": "S2", "n": 5, "params": "loss 30%"}
+{"ts_ms": 1793787036046, "phase": "T3", "action": "clear", "scenario": "S2", "n": 5}
+{"ts_ms": 1793787045535, "phase": "T3", "action": "inject", "scenario": "S3", "n": 1, "params": "loss 100%"}
+{"ts_ms": 1793787049005, "phase": "T3", "action": "clear", "scenario": "S3", "n": 1}
+{"ts_ms": 1793787058487, "phase": "T3", "action": "inject", "scenario": "S3", "n": 2, "params": "loss 100%"}
+{"ts_ms": 1793787061948, "phase": "T3", "action": "clear", "scenario": "S3", "n": 2}
+{"ts_ms": 1793787071467, "phase": "T3", "action": "inject", "scenario": "S3", "n": 3, "params": "loss 100%"}
+{"ts_ms": 1793787074939, "phase": "T3", "action": "clear", "scenario": "S3", "n": 3}
+{"ts_ms": 1793787084393, "phase": "T3", "action": "inject", "scenario": "S3", "n": 4, "params": "loss 100%"}
+{"ts_ms": 1793787087882, "phase": "T3", "action": "clear", "scenario": "S3", "n": 4}
+{"ts_ms": 1793787097365, "phase": "T3", "action": "inject", "scenario": "S3", "n": 5, "params": "loss 100%"}
+{"ts_ms": 1793787100842, "phase": "T3", "action": "clear", "scenario": "S3", "n": 5}
+{"ts_ms": 1793787112803, "phase": "T3", "action": "pc_stopped"}
+{"ts_ms": 1793787117530, "phase": "T3", "action": "hub_stopped"}
+{"ts_ms": 1793787118222, "phase": "T3", "action": "phase_end"}
+{"ts_ms": 1793787118225, "phase": "T4_A", "action": "phase_begin", "minutes": 4.0}
+{"ts_ms": 1793787129605, "phase": "T4_A", "action": "hub_started"}
+{"ts_ms": 1793787135651, "phase": "T4_A", "action": "pc_started", "pid": 30200}
+{"ts_ms": 1793787167986, "phase": "T4_A", "action": "phone_join_tapped"}
+{"ts_ms": 1793787410497, "phase": "T4_A", "action": "pc_stopped"}
+{"ts_ms": 1793787415396, "phase": "T4_A", "action": "hub_stopped"}
+{"ts_ms": 1793787416284, "phase": "T4_A", "action": "phase_end"}
+{"ts_ms": 1793787416288, "phase": "T4_B", "action": "phase_begin", "minutes": 4.0}
+{"ts_ms": 1793787427676, "phase": "T4_B", "action": "hub_started"}
+{"ts_ms": 1793787433714, "phase": "T4_B", "action": "pc_started", "pid": 53788}
+{"ts_ms": 1793787465667, "phase": "T4_B", "action": "phone_join_tapped"}
+{"ts_ms": 1793787712551, "phase": "T4_B", "action": "pc_stopped"}
+{"ts_ms": 1793787717354, "phase": "T4_B", "action": "hub_stopped"}
+{"ts_ms": 1793787718206, "phase": "T4_B", "action": "phase_end"}
+{"ts_ms": 1793787718208, "phase": "T6_N2", "action": "phase_begin", "minutes": 4.0}
+{"ts_ms": 1793787729595, "phase": "T6_N2", "action": "hub_started"}
+{"ts_ms": 1793787735642, "phase": "T6_N2", "action": "pc_started", "pid": 33512}
+{"ts_ms": 1793787767146, "phase": "T6_N2", "action": "phone_join_tapped"}
+{"ts_ms": 1793787767769, "phase": "T6_N2", "action": "impairment_on", "params": "loss 5%"}
+{"ts_ms": 1793788016579, "phase": "T6_N2", "action": "impairment_off"}
+{"ts_ms": 1793788028848, "phase": "T6_N2", "action": "pc_stopped"}
+{"ts_ms": 1793788033698, "phase": "T6_N2", "action": "hub_stopped"}
+{"ts_ms": 1793788034594, "phase": "T6_N2", "action": "phase_end"}
+{"ts_ms": 1793788034596, "phase": "T6_N4", "action": "phase_begin", "minutes": 4.0}
+{"ts_ms": 1793788045941, "phase": "T6_N4", "action": "hub_started"}
+{"ts_ms": 1793788051984, "phase": "T6_N4", "action": "pc_started", "pid": 58956}
+{"ts_ms": 1793788083244, "phase": "T6_N4", "action": "phone_join_tapped"}
+{"ts_ms": 1793788083879, "phase": "T6_N4", "action": "impairment_on", "params": "loss 3% delay 40ms 30ms rate 2mbit"}
+{"ts_ms": 1793788347270, "phase": "T6_N4", "action": "impairment_off"}
+{"ts_ms": 1793788359567, "phase": "T6_N4", "action": "pc_stopped"}
+{"ts_ms": 1793788554085, "phase": "T6_N4", "action": "hub_stopped"}
+{"ts_ms": 1793788554439, "phase": "T6_N4", "action": "phase_end"}
+{"ts_ms": 1793788554440, "phase": "collect", "action": "end", "out": "out\\2026-11-04_1h"}
+{"ts_ms": 1793788990834, "phase": "T3", "action": "phase_begin", "cycles": 5}
+{"ts_ms": 1793789060312, "phase": "T3", "action": "hub_started"}
+{"ts_ms": 1793789066359, "phase": "T3", "action": "pc_started", "pid": 38840}
+{"ts_ms": 1793789098490, "phase": "T3", "action": "phone_join_tapped"}
+{"ts_ms": 1793789098664, "phase": "T3", "action": "inject", "scenario": "S1", "n": 1, "how": "phone wifi off"}
+{"ts_ms": 1793789103834, "phase": "T3", "action": "clear", "scenario": "S1", "n": 1, "how": "phone wifi on"}
+{"ts_ms": 1793789112963, "phase": "T3", "action": "inject", "scenario": "S1", "n": 2, "how": "phone wifi off"}
+{"ts_ms": 1793789118090, "phase": "T3", "action": "clear", "scenario": "S1", "n": 2, "how": "phone wifi on"}
+{"ts_ms": 1793789127211, "phase": "T3", "action": "inject", "scenario": "S1", "n": 3, "how": "phone wifi off"}
+{"ts_ms": 1793789132349, "phase": "T3", "action": "clear", "scenario": "S1", "n": 3, "how": "phone wifi on"}
+{"ts_ms": 1793789141489, "phase": "T3", "action": "inject", "scenario": "S1", "n": 4, "how": "phone wifi off"}
+{"ts_ms": 1793789146632, "phase": "T3", "action": "clear", "scenario": "S1", "n": 4, "how": "phone wifi on"}
+{"ts_ms": 1793789155754, "phase": "T3", "action": "inject", "scenario": "S1", "n": 5, "how": "phone wifi off"}
+{"ts_ms": 1793789160865, "phase": "T3", "action": "clear", "scenario": "S1", "n": 5, "how": "phone wifi on"}
+{"ts_ms": 1793789944278, "phase": "T3", "action": "phase_begin", "cycles": 5}
+{"ts_ms": 1793789955951, "phase": "T3", "action": "hub_started"}
+{"ts_ms": 1793789961995, "phase": "T3", "action": "pc_started", "pid": 19956}
+{"ts_ms": 1793789994559, "phase": "T3", "action": "phone_join_tapped"}
+{"ts_ms": 1793789994743, "phase": "T3", "action": "inject", "scenario": "S1", "n": 1, "how": "phone wifi off"}
+{"ts_ms": 1793789999870, "phase": "T3", "action": "clear", "scenario": "S1", "n": 1, "how": "phone wifi on"}
+{"ts_ms": 1793790009006, "phase": "T3", "action": "inject", "scenario": "S1", "n": 2, "how": "phone wifi off"}
+{"ts_ms": 1793790014149, "phase": "T3", "action": "clear", "scenario": "S1", "n": 2, "how": "phone wifi on"}
+{"ts_ms": 1793790023282, "phase": "T3", "action": "inject", "scenario": "S1", "n": 3, "how": "phone wifi off"}
+{"ts_ms": 1793790028413, "phase": "T3", "action": "clear", "scenario": "S1", "n": 3, "how": "phone wifi on"}
+{"ts_ms": 1793790037533, "phase": "T3", "action": "inject", "scenario": "S1", "n": 4, "how": "phone wifi off"}
+{"ts_ms": 1793790042662, "phase": "T3", "action": "clear", "scenario": "S1", "n": 4, "how": "phone wifi on"}
+{"ts_ms": 1793790051786, "phase": "T3", "action": "inject", "scenario": "S1", "n": 5, "how": "phone wifi off"}
+{"ts_ms": 1793790056918, "phase": "T3", "action": "clear", "scenario": "S1", "n": 5, "how": "phone wifi on"}
+{"ts_ms": 1793790066819, "phase": "T3", "action": "inject", "scenario": "S2", "n": 1, "params": "loss 30%"}
+{"ts_ms": 1793790072409, "phase": "T3", "action": "clear", "scenario": "S2", "n": 1}
+{"ts_ms": 1793790082046, "phase": "T3", "action": "inject", "scenario": "S2", "n": 2, "params": "loss 30%"}
+{"ts_ms": 1793790087656, "phase": "T3", "action": "clear", "scenario": "S2", "n": 2}
+{"ts_ms": 1793790097270, "phase": "T3", "action": "inject", "scenario": "S2", "n": 3, "params": "loss 30%"}
+{"ts_ms": 1793790102811, "phase": "T3", "action": "clear", "scenario": "S2", "n": 3}
+{"ts_ms": 1793790112370, "phase": "T3", "action": "inject", "scenario": "S2", "n": 4, "params": "loss 30%"}
+{"ts_ms": 1793790117995, "phase": "T3", "action": "clear", "scenario": "S2", "n": 4}
+{"ts_ms": 1793790127604, "phase": "T3", "action": "inject", "scenario": "S2", "n": 5, "params": "loss 30%"}
+{"ts_ms": 1793790133205, "phase": "T3", "action": "clear", "scenario": "S2", "n": 5}
+{"ts_ms": 1793790142763, "phase": "T3", "action": "inject", "scenario": "S3", "n": 1, "params": "loss 100%"}
+{"ts_ms": 1793790146419, "phase": "T3", "action": "clear", "scenario": "S3", "n": 1}
+{"ts_ms": 1793790155969, "phase": "T3", "action": "inject", "scenario": "S3", "n": 2, "params": "loss 100%"}
+{"ts_ms": 1793790159609, "phase": "T3", "action": "clear", "scenario": "S3", "n": 2}
+{"ts_ms": 1793790169144, "phase": "T3", "action": "inject", "scenario": "S3", "n": 3, "params": "loss 100%"}
+{"ts_ms": 1793790172725, "phase": "T3", "action": "clear", "scenario": "S3", "n": 3}
+{"ts_ms": 1793790182284, "phase": "T3", "action": "inject", "scenario": "S3", "n": 4, "params": "loss 100%"}
+{"ts_ms": 1793790185852, "phase": "T3", "action": "clear", "scenario": "S3", "n": 4}
+{"ts_ms": 1793790195394, "phase": "T3", "action": "inject", "scenario": "S3", "n": 5, "params": "loss 100%"}
+{"ts_ms": 1793790199042, "phase": "T3", "action": "clear", "scenario": "S3", "n": 5}
+{"ts_ms": 1793790210977, "phase": "T3", "action": "pc_stopped"}
+{"ts_ms": 1793790217894, "phase": "T3", "action": "hub_stopped"}
+{"ts_ms": 1793790218888, "phase": "T3", "action": "phase_end"}
+{"ts_ms": 1793790218890, "phase": "T6_N4", "action": "phase_begin", "minutes": 4}
+{"ts_ms": 1793790230560, "phase": "T6_N4", "action": "hub_started"}
+{"ts_ms": 1793790236607, "phase": "T6_N4", "action": "pc_started", "pid": 11596}
+{"ts_ms": 1793790268791, "phase": "T6_N4", "action": "phone_join_tapped"}
+{"ts_ms": 1793790269514, "phase": "T6_N4", "action": "impairment_on", "params": "loss 3% delay 40ms 30ms rate 2mbit"}
+{"ts_ms": 1793790517946, "phase": "T6_N4", "action": "impairment_off"}
+{"ts_ms": 1793790530214, "phase": "T6_N4", "action": "pc_stopped"}
+{"ts_ms": 1793790538114, "phase": "T6_N4", "action": "hub_stopped"}
+{"ts_ms": 1793790539270, "phase": "T6_N4", "action": "phase_end"}

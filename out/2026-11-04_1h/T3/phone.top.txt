@@ -1,0 +1,54 @@
+=== ts_ms=1793790208613
+Threads: 47 total,   0 running,  47 sleeping,   0 stopped,   0 zombie
+  Mem:  7471124K total,  7412712K used,    58412K free,     4224K buffers
+ Swap:  8388604K total,  3443424K used,  4945180K free,  1714584K cached
+800%cpu  96%user   7%nice 171%sys 493%idle   0%iow  18%irq  14%sirq   0%host
+  TID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ THREAD          PROCESS
+32308 u0_a363      10 -10  11G 164M  95M S 17.8   2.2   0:35.93 studio.siren_ui com.sirenstudio.siren_ui
+32374 u0_a363      15  -5  11G 164M  95M S 14.2   2.2   0:26.16 1.raster        com.sirenstudio.siren_ui
+ 1105 u0_a363      10 -10  11G 164M  95M S 10.7   2.2   0:17.64 siren-mesh-send com.sirenstudio.siren_ui
+ 1095 u0_a363      10 -10  11G 164M  95M S 10.7   2.2   0:10.75 siren-udp-recei com.sirenstudio.siren_ui
+ 1110 u0_a363      10 -10  11G 164M  95M S  3.5   2.2   0:02.38 siren-bt-relay  com.sirenstudio.siren_ui
+ 1100 u0_a363       4 -16  11G 164M  95M S  3.5   2.2   0:03.50 AudioTrack      com.sirenstudio.siren_ui
+ 1097 u0_a363      10 -10  11G 164M  95M S  3.5   2.2   0:00.63 Thread-9        com.sirenstudio.siren_ui
+32395 u0_a363      15  -5  11G 164M  95M S  3.5   2.2   0:07.50 IplrVkResMgr    com.sirenstudio.siren_ui
+ 6555 u0_a363      10 -10  11G 164M  95M S  0.0   2.2   0:00.01 mDNS_daemon     com.sirenstudio.siren_ui
+ 5702 u0_a363      20   0  11G 164M  95M S  0.0   2.2   0:00.30 binder:32308_6  com.sirenstudio.siren_ui
+ 1253 u0_a363      20   0  11G 164M  95M S  0.0   2.2   0:00.42 binder:32308_5  com.sirenstudio.siren_ui
+ 1108 u0_a363      10 -10  11G 164M  95M S  0.0   2.2   0:04.65 siren-bt-udp    com.sirenstudio.siren_ui
+ 1106 u0_a363      10 -10  11G 164M  95M S  0.0   2.2   0:00.19 siren-mesh-disc com.sirenstudio.siren_ui
+ 1111 u0_a363      10 -10  11G 164M  95M S  0.0   2.2   0:00.03 siren-hybrid    com.sirenstudio.siren_ui
+ 1096 u0_a363      10 -10  11G 164M  95M S  0.0   2.2   0:00.83 mDNS_daemon     com.sirenstudio.siren_ui
+ 1005 u0_a363      20   0  11G 164M  95M S  0.0   2.2   0:00.60 binder:32308_4  com.sirenstudio.siren_ui
+  983 u0_a363      10 -10  11G 164M  95M S  0.0   2.2   0:01.13 DartWorker      com.sirenstudio.siren_ui
+  351 u0_a363       0 -20  11G 164M  95M S  0.0   2.2   0:00.23 binder:32308_3  com.sirenstudio.siren_ui
+  349 u0_a363      10 -10  11G 164M  95M S  0.0   2.2   0:00.00 hwuiTask1       com.sirenstudio.siren_ui
+  348 u0_a363      10 -10  11G 164M  95M S  0.0   2.2   0:00.00 hwuiTask0       com.sirenstudio.siren_ui
+  341 u0_a363      20   0  11G 164M  95M S  0.0   2.2   0:00.00 SurfaceSyncGrou com.sirenstudio.siren_ui
+32518 u0_a363      20   0  11G 164M  95M S  0.0   2.2   0:00.00 FramePredictIni com.sirenstudio.siren_ui
+32498 u0_a363      20   0  11G 164M  95M S  0.0   2.2   0:00.00 WifiManagerThre com.sirenstudio.siren_ui
+32394 u0_a363      15  -5  11G 164M  95M S  0.0   2.2   0:01.39 IplrVkFenceWait com.sirenstudio.siren_ui
+32383 u0_a363      15  -5  11G 164M  95M S  0.0   2.2   0:00.00 io.worker.3     com.sirenstudio.siren_ui
+32377 u0_a363      21   1  11G 164M  95M S  0.0   2.2   0:00.00 io.worker.1     com.sirenstudio.siren_ui
+32378 u0_a363      21   1  11G 164M  95M S  0.0   2.2   0:00.00 io.worker.2     com.sirenstudio.siren_ui
+32379 u0_a363      10 -10  11G 164M  95M S  0.0   2.2   0:00.58 dart:io EventHa com.sirenstudio.siren_ui
+32381 u0_a363      15  -5  11G 164M  95M S  0.0   2.2   0:00.00 io.worker.1     com.sirenstudio.siren_ui
+32382 u0_a363      15  -5  11G 164M  95M S  0.0   2.2   0:00.00 io.worker.2     com.sirenstudio.siren_ui
+32384 u0_a363      15  -5  11G 164M  95M S  0.0   2.2   0:00.00 io.worker.4     com.sirenstudio.siren_ui
+32375 u0_a363      20   0  11G 164M  95M S  0.0   2.2   0:00.00 1.io            com.sirenstudio.siren_ui
+32335 u0_a363      20   0  11G 164M  95M S  0.0   2.2   0:00.00 Timer-1         com.sirenstudio.siren_ui
+32339 u0_a363      10 -10  11G 164M  95M S  0.0   2.2   0:00.01 RenderThread    com.sirenstudio.siren_ui
+32334 u0_a363      20   0  11G 164M  95M S  0.0   2.2   0:00.00 Timer-0         com.sirenstudio.siren_ui
+32330 u0_a363      29   9  11G 164M  95M S  0.0   2.2   0:00.00 Profile Saver   com.sirenstudio.siren_ui
+32326 u0_a363      20   0  11G 164M  95M S  0.0   2.2   0:00.02 binder:32308_3  com.sirenstudio.siren_ui
+32323 u0_a363      20   0  11G 164M  95M S  0.0   2.2   0:00.01 32308-ScoutStat com.sirenstudio.siren_ui
+32319 u0_a363      20   0  11G 164M  95M S  0.0   2.2   0:00.03 binder:32308_1  com.sirenstudio.siren_ui
+32320 u0_a363      20   0  11G 164M  95M S  0.0   2.2   0:00.12 binder:32308_2  com.sirenstudio.siren_ui
+32315 u0_a363      24   4  11G 164M  95M S  0.0   2.2   0:00.00 HeapTaskDaemon  com.sirenstudio.siren_ui
+32317 u0_a363      24   4  11G 164M  95M S  0.0   2.2   0:00.00 FinalizerDaemon com.sirenstudio.siren_ui
+32316 u0_a363      24   4  11G 164M  95M S  0.0   2.2   0:00.00 ReferenceQueueD com.sirenstudio.siren_ui
+32318 u0_a363      24   4  11G 164M  95M S  0.0   2.2   0:00.00 FinalizerWatchd com.sirenstudio.siren_ui
+32314 u0_a363      29   9  11G 164M  95M S  0.0   2.2   0:00.01 Jit thread pool com.sirenstudio.siren_ui
+32313 u0_a363       0 -20  11G 164M  95M S  0.0   2.2   0:00.00 perfetto_hprof_ com.sirenstudio.siren_ui
+32312 u0_a363       0 -20  11G 164M  95M S  0.0   2.2   0:00.00 Signal Catcher  com.sirenstudio.siren_ui
+

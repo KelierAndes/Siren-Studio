@@ -30,6 +30,9 @@ pub struct DiscoveredPeer {
     pub bt: Option<String>,
     /// RFCOMM channel advertised by the peer.
     pub bt_channel: Option<u8>,
+    /// F6: HMAC-SHA256(psk, id|bit|bt|channel) — election credentials are
+    /// only trusted when this verifies against the group key.
+    pub sig: Option<String>,
 }
 
 /// Keeps a service registered for as long as it is alive.
@@ -40,7 +43,7 @@ pub struct Advertiser {
 
 impl Advertiser {
     pub fn start(role: &str, name: &str, port: u16, codec: &str, id: &str) -> Result<Self> {
-        Self::start_full(role, name, port, codec, id, None, None, None)
+        Self::start_full(role, name, port, codec, id, None, None, None, None)
     }
 
     /// Advertise the mesh node including the Bluetooth facts peers need for
@@ -54,6 +57,7 @@ impl Advertiser {
         bit: Option<u8>,
         bt: Option<&str>,
         bt_channel: Option<u8>,
+        sig: Option<&str>,
     ) -> Result<Self> {
         let daemon =
             ServiceDaemon::new().map_err(|e| CoreError::Discovery(format!("mdns daemon: {e}")))?;
@@ -138,8 +142,9 @@ pub fn advertise_full(
     bit: Option<u8>,
     bt: Option<&str>,
     bt_channel: Option<u8>,
+    sig: Option<&str>,
 ) -> Result<Advertiser> {
-    Advertiser::start_full(role, name, port, codec, id, bit, bt, bt_channel)
+    Advertiser::start_full(role, name, port, codec, id, bit, bt, bt_channel, sig)
 }
 
 /// Browse for `duration` and return every resolved node.
@@ -234,6 +239,10 @@ fn peer_from_resolved(resolved: &mdns_sd::ResolvedService) -> Option<DiscoveredP
         .get_property_val_str("btch")
         .and_then(|value| value.parse::<u8>().ok())
         .filter(|channel| (1..=30).contains(channel));
+    let sig = resolved
+        .get_property_val_str("sig")
+        .map(str::to_string)
+        .filter(|value| !value.is_empty());
 
     Some(DiscoveredPeer {
         name,
@@ -247,6 +256,7 @@ fn peer_from_resolved(resolved: &mdns_sd::ResolvedService) -> Option<DiscoveredP
         bit,
         bt,
         bt_channel,
+        sig,
     })
 }
 

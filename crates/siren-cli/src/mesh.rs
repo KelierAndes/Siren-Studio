@@ -52,6 +52,9 @@ pub struct MeshArgs {
     /// Seconds between mDNS scans.
     #[arg(long, default_value_t = 2)]
     pub discovery_secs: u64,
+    /// F6: group password — AEAD-sealed Wi-Fi datagrams + signed election.
+    #[arg(long)]
+    pub password: Option<String>,
     /// Stop automatically after N seconds.
     #[arg(long)]
     pub duration: Option<f64>,
@@ -145,6 +148,7 @@ pub fn run(args: MeshArgs) -> Result<()> {
         amplitude: args.amplitude,
         discovery_secs: args.discovery_secs.max(1),
         static_peers: args.peers.clone(),
+        password: args.password.clone(),
         record: args.record.clone(),
         ..MeshConfig::default()
     };

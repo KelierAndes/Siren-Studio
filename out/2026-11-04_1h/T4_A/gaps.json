@@ -1,0 +1,1 @@
+{"wav": "out/2026-11-04_1h/T4_A/recording.wav", "seconds": 281.6, "blocks": 56320, "median_db": -11.9, "zero_blocks": 2082, "events": 1, "unexplained": 1, "unexplained_ms": 10410.0, "list": [{"start": 0.0, "ms": 10410.0, "kind": "数字静音+电平塌陷", "depth_db": -240.0, "step": 0.0, "cause": "未解释：计数与日志均无变化", "explained": false, "streams": [], "counters": {}, "log": []}]}

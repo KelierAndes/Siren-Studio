@@ -87,6 +87,8 @@ struct HybridShared {
     /// Bluetooth address of the hub we currently hold a link to. Adopting an
     /// mDNS hub whose address matches must NOT tear the live link down.
     linked: Mutex<Option<String>>,
+    /// E3: consecutive failed offline dial rounds (drives the backoff).
+    offline_failures: AtomicU32,
     /// True only while this node is the hub and listening. A leaf must not
     /// accept extra links: relaying from a leaf would put two audio streams
     /// on one narrow RFCOMM link and starve both.
@@ -157,6 +159,7 @@ impl HybridNode {
             scanning: AtomicBool::new(false),
             discovered: Mutex::new(None),
             linked: Mutex::new(None),
+            offline_failures: AtomicU32::new(0),
             is_hub: AtomicBool::new(false),
         });
         let stop = Arc::new(AtomicBool::new(false));
@@ -818,12 +821,13 @@ fn supervise(
                     })
                     .ok();
             }
+            let failures = shared.offline_failures.load(Ordering::Relaxed);
             if dialable
                 && tunnel.link_count() == 0
                 && dial_ready
                 && !shared.connecting.load(Ordering::Relaxed)
                 && last_remembered_attempt
-                    .map(|at| at.elapsed() >= Duration::from_secs(REMEMBERED_DIAL_SECS))
+                    .map(|at| at.elapsed() >= offline_backoff(failures))
                     .unwrap_or(true)
             {
                 let targets = dial_targets(&remembered);
@@ -844,21 +848,22 @@ fn supervise(
                 thread::Builder::new()
                     .name("siren-bt-dial".into())
                     .spawn(move || {
-                        match dial_with_backoff(
-                            &transport,
-                            &tunnel,
-                            &entry.bt,
-                            entry.channel,
-                            &dial_stop,
-                        ) {
+                        match dial_once(&transport, &tunnel, &entry.bt, entry.channel, &dial_stop) {
                             Ok(_) => {
                                 connected.dial_failures.store(0, Ordering::Relaxed);
+                                connected.offline_failures.store(0, Ordering::Relaxed);
                                 *connected.linked.lock().unwrap() = Some(entry.bt.clone());
                                 remember_hub(&memory_path, &entry);
                             }
                             Err(error) => {
                                 connected.dial_failures.fetch_add(1, Ordering::Relaxed);
-                                log::info!("hybrid: remembered dial {}: {error}", entry.bt);
+                                let failures =
+                                    connected.offline_failures.fetch_add(1, Ordering::Relaxed) + 1;
+                                log::info!(
+                                    "hybrid: remembered dial {} failed ({failures} in a row, next in {:?}): {error}",
+                                    entry.bt,
+                                    offline_backoff(failures)
+                                );
                             }
                         }
                         connected.connecting.store(false, Ordering::Relaxed);
@@ -1018,6 +1023,35 @@ fn supervise(
 /// supervisor's next paced attempt would leave the mesh silent for seconds after
 /// every stall. The whole burst counts as one failure, so re-election timing is
 /// unchanged: a hub that is really gone is still given up on after three bursts.
+/// One connect attempt, no inner retries (E3/A2): the offline redial loop
+/// owns the pacing. The old inner 0/200/600/1500 ms retries made every
+/// round fire four RFCOMM dials — 470 dials in 12 min against a dead hub.
+fn dial_once(
+    transport: &Arc<dyn BtTransport>,
+    tunnel: &Arc<Tunnel>,
+    address: &str,
+    channel: u8,
+    stop: &AtomicBool,
+) -> Result<()> {
+    if stop.load(Ordering::Relaxed) || tunnel.link_count() > 0 {
+        return Err(CoreError::Backend("dial cancelled".into()));
+    }
+    transport
+        .connect(address, channel)
+        .and_then(|link| tunnel.add_link(Box::new(link)))
+        .map(|_| ())
+}
+
+/// Exponential redial pacing for the offline leaf (E3): 1/2/4/8/16/30 s,
+/// and once 5 rounds have failed in a row fall back to a 5 min probe so a
+/// hub that is simply switched off costs one dial per 5 minutes.
+fn offline_backoff(failures: u32) -> Duration {
+    if failures >= 5 {
+        return Duration::from_secs(300);
+    }
+    Duration::from_secs(1u64 << failures.min(5))
+}
+
 fn dial_with_backoff(
     transport: &Arc<dyn BtTransport>,
     tunnel: &Arc<Tunnel>,

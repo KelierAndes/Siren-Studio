@@ -1,0 +1,11 @@
+run_started_utc=2026-11-04T09:54:26.694089+00:00
+commit=4083861
+构建=三端同一提交（含修剪不清空修复 8da4250 与心跳未连接套接字 4415a3e）
+Linux hub=Linux 6.18.18.c1107-trim | enp1s0
+Windows sender=ADMINISTRATOR
+Android=M2012K11G / Android 14 / serial 6471a65
+clock_check=09:55:24.985 | pc 17:55:24.986
+缓冲目标=100 ms 帧长=5 ms Wi-Fi=raw 蓝牙=Opus 24kbps
+插桩=I1 修剪(mixer) / I3 零值游程(capture+mix) / I2 载波切换(既有 switch 三段)
+未做插桩=发送端 DSP 状态快照、采集环补零计数、解码器重置原因
+计划时长=60.0 分钟 quick=False

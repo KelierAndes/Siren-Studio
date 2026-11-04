@@ -36,6 +36,24 @@
 | LATE_DUPLICATE_LIMIT | `-250_000` → `-1_000`（~5 s）；发送端重启单测 + 陈旧 BT 副本仍为重复的单测 | `net/udp.rs` | 重启后立即重同步（8/8 稳定）；5 s 内迟到副本仍被静默丢弃 | ✅ 2026-11-04 |
 | 幽灵流 | 载体门移到建流之前：Wi-Fi 健康时 BT 副本不再建出 0 包僵尸流（首触 BT 流仍放行） | `net/udp.rs` create_peer 前 | 载体门逻辑前移；既有仲裁单测全绿 | ✅ 2026-11-04 |
 
+## Phase 2.5 · 现场暴露问题（2026-11-04 1 小时采集）⬜
+
+来源：`out/2026-11-04_1h/`（T1/T3/T4/T6 六阶段，1 小时）与结论 `FINDINGS.md`、复核 `VERIFICATION.md`。顺序即优先级：先让数据可信（E0），再修用户能直接听出来的（E1/E2），再定位（E5）。
+
+| 任务 | 内容 | 落点 | 验收 | 状态 |
+| :-- | :-- | :-- | :-- | :-- |
+| E0 | 采集基座可信化：阶段启动前检查 47900 占用并清理残留 `siren.exe`；`pc.log/pc.stats` 按 run 命名；NAS 开 NTP；包内默认带 `master.csv`/`streams.csv` + 手机 I 级运行行 | `scripts/collect_1h.py`、打包脚本 | 连跑两轮，6 阶段文件齐全、无 `bind 10048`、无混写 | ⬜ |
+| E1 | 修剪改限速削（A3/A4，承接 MIX1）：单次 ≤60 ms、间隔 ≥200 ms，逐步回落到 target+10 ms；等突发结束再削；push 侧加硬上限，禁止 ring 一次吃进 1 s | `dsp/resampler.rs`、`net/udp.rs` push 路径 | T1 型 12 min：单次 dropped ≤100 ms、最小间隔 ≥200 ms，混音零值 >100 ms 归零，clicks 仍为 0 | ⬜ |
+| E2 | 全零不上行（A5）：采集连续 ≥200 ms 全零则不发音频帧（保 keepalive），接收端不填静音；UI 标"源静音"，快照加 `sender.silent_ms` | `capture/*`、`mesh.rs`、`metrics.rs` | 起播前不再出现"满水位全零"；T4 型阶段启动段静音 <1 s | ⬜ |
+| E3 | 拨号指数退避（A2）：1/2/4/8/16/30 s 封顶，连续 5 次失败后降为 5 min 探测；修 `notifyPowerKeeper` 的 BLUETOOTH_ADMIN 异常路径 | `mesh.rs` hybrid 重连 | hub 无 BT 跑 12 min，拨号 ≤10 次 | ⬜ |
+| E4 | 端点回打与发现失效（A6/A7）：优先用收包 src 回发；发现项 30 s TTL；发送失败 3 次触发重发现；换 stream id 后 3 s 内移除旧流 | `net/udp.rs`、`net/discovery.rs`、`mesh.rs` | 阶段启动无 `Connection refused` 突发；`active_streams` 3 s 内回落 | ⬜ |
+| E5 | 定位 A1：三组 12 min 对照（只关蓝牙 / 只关 Wi-Fi 省电 / 都关），手机 stats 增加 `tx_eagain`、roam/rssi、wakeup 计数，定时抓 `dumpsys wifi` | `scripts/collect_1h.py`、Android stats | 产出"EAGAIN + 1.1 s 洞是否随某项消失"判定表；三项均无效则转固件/AP，不再改软件 | ⬜ |
+| E6 | 弱网自动降级（A10/T6_N4）：按水位趋势与丢包率在 raw s16 ↔ Opus 间切换，目标水位随载波/码率自适应 | `net/udp.rs`、`mesh.rs`、`protocol.rs` | `rate 2mbit` 档位无声占比 <5%，无需手动干预 | ⬜ |
+| E7 | 可观测补齐（A12）：三端上报 `silent_ms/silent_gaps/rtt`；发送端在首帧入队时写 epoch（绝对延迟可测） | `metrics.rs`、三端 UI、`siren-cli` | 手机/PC 快照也有无声指标；脉冲法能给出绝对延迟 P50/P95 | ⬜ |
+| E8 | 双栈补测：hub 以 `--bt` 启动，重跑 T3 的 S1–S3 | `scripts/collect_1h.py` | 出现 wifi→bluetooth→wifi 的切换记录与三段耗时（当前为空白） | ⬜ |
+
+估算：E0 0.5 天 · E1 2–3 天 · E2 1 天 · E3+E4 2 天 · E5 2–3 天 · E6 3–5 天 · E7+E8 2 天。若只有 3 天窗口，只做 **E0 + E1 + E3**（覆盖跳音、启动无声、拨号风暴）。
+
 ## Phase 3 · 安全（1–2 周，需一次设计评审）⬜
 
 - F6：组密码 → 帧 AEAD（XChaCha20-Poly1305）或独立握手；选举签名；WebUI 默认绑 `127.0.0.1`。
@@ -53,6 +71,9 @@ F5 按链路质量选码率 + in-band FEC；F15 gossip 替代单 mDNS；F16 TXT 
 - MIUI 卸载后 `adb install` 需机主在开发者选项重新允许 USB 安装。
 - 手机 raw 双流上行 ~12% 丢包 + 修剪/欠载每秒 ~4 次是 MIX1 的活体复现场景（Phase 2 的对照现场）。
 - PC↔NAS 的 RFCOMM 链路至今未建立成功——P0-1 内存 BT 传输不能拿它当参照，按手机↔NAS 的实测行为建模。
+- NAS 时钟比 PC 快 50–60 s 且持续漂移（≈0.5%）：`timeline.csv`（PC 钟）与 hub/手机日志不能相减，跨机分析只用相对时间；绝对延迟必须由发送端自己打"首帧入队"标记。
+- 采集只录 hub 的 monitor 时，手机的收听故障完全不可见（本轮 `Connection refused` 持续 20 s 就是这样漏掉的）；任何"三端可用性"结论都要有手机侧数据。
+- 手机侧关键事实（`trace:`/`audible gap`/`hybrid:`）是 logcat 的 I 级，日志裁剪只留 E/W 会把证据全部丢掉。
 
 ## 变更记录
 
@@ -60,3 +81,4 @@ F5 按链路质量选码率 + in-band FEC；F15 gossip 替代单 mDNS；F16 TXT 
 - 2026-11-04（Phase 1）：s16/斜坡/限幅落地，实测 loss2 丢包 1.96%（分片叠加消除）、咔哒归零；数据见 docs/baselines/2026-11-04-phase1/。
 - 2026-11-04（Phase 2）：冻结+渐隐（MIX1/F8）、LATE_DUPLICATE_LIMIT 收紧至 ~5 s、幽灵流载体门前移、F13 路由周期刷新、F7 克隆检测。统一验收（7×10 矩阵）：咔哒全 0、无流全 0、修剪全 0；loss2 1.99%/loss10 10.05%（分片叠加消除）；bw1800 26.7%→0%；delay200/jitter50 仍为重排主导（未排期）。见 docs/baselines/2026-11-04-phase2/。
 - 2026-11-04：Phase 0 完成。基线要点（真实 Wi-Fi，PC↔NAS）：clean 0% 丢包；loss2 实测 ~4%（netem 2% 配置 ×2 待校准）；**delay200/jitter50 的高"丢包"（43%/67%）主要来自 netem 抖动重排 + 接收端无重排容忍窗口**（jitter50 欠载 1278/重置 407——这是 F2/F5 的直接靶子）；bw1800 欠载 3816。NAS 已部署新二进制（心跳/咔哒生效）。
+- 2026-11-04（Phase 2.5 建档）：1 小时六阶段采集完成，暴露 12 项异常（`out/2026-11-04_1h/FINDINGS.md`、复核 `VERIFICATION.md`）。关键量化：手机侧一次修剪扔 751.6 ms（fill 851.6 ms，目标是 100 ms）且 80 ms 内连发 3 次；手机 12 min 内蓝牙拨号 470 次全失败（无退避）；发送端起播前持续发全零 8.0–8.3 s；手机上行 `EAGAIN` 与双向 1.1 s 空洞同时发生（T1 两次，四个 4 分钟阶段为 0）；`rate 2mbit` 下水位塌到 0、5 分钟 209.6 s 无声。排期见 Phase 2.5（E0–E8）。
