@@ -48,6 +48,9 @@ void main() {
       health: 0,
       bufferMs: 128,
       bufferMaxMs: 250,
+      latencyMs: 5.4,
+      latencyP99Ms: 10.2,
+      lossPct: 0,
     );
     model.channels[1].setFacts(
       rms: -9.2,
@@ -57,6 +60,9 @@ void main() {
       health: 1,
       bufferMs: 232,
       bufferMaxMs: 810,
+      latencyMs: 88.0,
+      latencyP99Ms: 140.0,
+      lossPct: 2.5,
     );
 
     await tester.pumpWidget(
@@ -73,6 +79,9 @@ void main() {
     expect(find.text('路径'), findsNWidgets(2));
     expect(find.text('丢帧'), findsNWidgets(2));
     expect(find.text('欠载'), findsNWidgets(2));
+    expect(find.text('延迟 ms'), findsNWidgets(2));
+    expect(find.text('5/10'), findsOneWidget);
+    expect(find.text('88/140 ·3%'), findsOneWidget);
     expect(find.text('-18.5'), findsOneWidget);
     expect(find.text('Wi-Fi'), findsOneWidget);
     expect(find.text('缓冲'), findsAtLeastNWidgets(2));
@@ -114,6 +123,9 @@ void main() {
       health: 0,
       bufferMs: 96,
       bufferMaxMs: 250,
+      latencyMs: 12.0,
+      latencyP99Ms: 34.0,
+      lossPct: 0,
     );
 
     await tester.pumpWidget(
@@ -125,6 +137,7 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('本机'), findsOneWidget);
     expect(find.text('组网'), findsOneWidget);
+    expect(find.text('12/34'), findsOneWidget);
     expect(find.text('当前电平'), findsNWidgets(2));
     expect(find.text('缓冲'), findsWidgets);
     expect(find.text('BYPASS'), findsOneWidget);

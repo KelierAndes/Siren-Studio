@@ -358,7 +358,8 @@ class _Facts extends StatelessWidget {
   final MetalPalette palette;
   final ModuleChannel channel;
 
-  /// 心跳量测：P50/P99 往返，丢包只在非零时占位。
+  /// 心跳量测：P50/P99 往返，单位放在标签上，数值只留数字——
+  /// 卡片宽度有限，带 " ms" 会被省略号截断。
   String get _latencyText {
     final p50 = channel.latencyMs;
     if (p50 == null) return '—';
@@ -366,7 +367,7 @@ class _Facts extends StatelessWidget {
     final loss = channel.lossPct;
     final span = p99 == null ? '${p50.round()}' : '${p50.round()}/${p99.round()}';
     final tail = (loss == null || loss < 0.05) ? '' : ' ·${loss.round()}%';
-    return '$span ms$tail';
+    return '$span$tail';
   }
 
   @override
@@ -383,7 +384,7 @@ class _Facts extends StatelessWidget {
           _row('路径', channel.pathText),
           _row('丢帧', '${channel.lostFrames}'),
           _row('欠载', '${channel.underruns}'),
-          _row('延迟', _latencyText),
+          _row('延迟 ms', _latencyText),
         ],
       ),
     );
