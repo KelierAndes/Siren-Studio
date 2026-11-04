@@ -33,6 +33,8 @@ pub struct DiscoveredPeer {
     /// F6: HMAC-SHA256(psk, id|bit|bt|channel) — election credentials are
     /// only trusted when this verifies against the group key.
     pub sig: Option<String>,
+    /// F16: mesh protocol version the peer advertises.
+    pub proto: Option<u8>,
 }
 
 /// Keeps a service registered for as long as it is alive.
@@ -243,6 +245,9 @@ fn peer_from_resolved(resolved: &mdns_sd::ResolvedService) -> Option<DiscoveredP
         .get_property_val_str("sig")
         .map(str::to_string)
         .filter(|value| !value.is_empty());
+    let proto = resolved
+        .get_property_val_str("proto")
+        .and_then(|value| value.parse::<u8>().ok());
 
     Some(DiscoveredPeer {
         name,
@@ -257,6 +262,7 @@ fn peer_from_resolved(resolved: &mdns_sd::ResolvedService) -> Option<DiscoveredP
         bt,
         bt_channel,
         sig,
+        proto,
     })
 }
 

@@ -36,6 +36,7 @@ use crate::format::{frames_for_ms, CHANNELS};
 use crate::metrics::now_us;
 use crate::net::discovery;
 use crate::net::udp::{FramePacker, UdpSender};
+use crate::protocol::Codec;
 use crate::{CoreError, Result};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -263,6 +264,8 @@ struct MeshShared {
     clone_warned: Mutex<bool>,
     /// E2: total time the capture was silent enough to suppress uplink (ms).
     silent_tx_ms: AtomicU64,
+    /// F15: learned node table (from gossip datagrams).
+    gossip: Arc<crate::net::udp::GossipTable>,
     /// E7/A11: unix us of the first audible captured frame — absolute
     /// end-to-end latency becomes measurable against the receiver's clock.
     first_frame_epoch_us: AtomicU64,
@@ -386,6 +389,7 @@ impl MeshEngine {
         let uid = node_uid(&node_id);
         let bit = config.bit.unwrap_or((uid % 64) as u8);
         let mix_tap = Arc::new(crate::net::udp::MixTap::new());
+        let gossip = Arc::new(crate::net::udp::GossipTable::new());
         let shared = Arc::new(MeshShared {
             stop: Arc::new(AtomicBool::new(false)),
             running: AtomicBool::new(false),
@@ -407,6 +411,7 @@ impl MeshEngine {
             clone_warned: Mutex::new(false),
             silent_tx_ms: AtomicU64::new(0),
             first_frame_epoch_us: AtomicU64::new(0),
+            gossip: gossip.clone(),
             topology: Arc::new(Mutex::new(Vec::new())),
             tunnel: Mutex::new(None),
             bt: Mutex::new(BtStatus {
@@ -471,6 +476,7 @@ impl MeshEngine {
             mix_tap: Some(mix_tap),
             bt_exempt_ports: config.bt_exempt_ports.clone(),
             password: config.password.clone(),
+            gossip: Some(gossip.clone()),
         })?;
 
         let bind = center.bind_addr();
@@ -713,12 +719,14 @@ fn run_mesh_sender(
             .password
             .as_ref()
             .map(|pw| crate::net::crypto::MeshKey::from_password(pw));
+        let discover_node_id = node_id.clone();
+        let discover_bind = bind.clone();
         let _ = std::thread::Builder::new()
             .name("siren-mesh-discover".into())
             .spawn(move || {
                 run_discovery_loop(
-                    node_id,
-                    bind,
+                    discover_node_id,
+                    discover_bind,
                     peers,
                     topology,
                     stop_flag,
@@ -910,6 +918,13 @@ fn run_mesh_sender(
         // Sync local senders with the current peer set.
         let current = peers.lock().unwrap().clone();
         senders.retain(|endpoint, _| current.contains_key(endpoint));
+        // F5/E6: per-endpoint adaptive codec state. `0` = configured codec;
+        // while running Opus the counter tracks consecutive healthy ticks.
+        let mut adaptive: HashMap<String, u32> = HashMap::new();
+        const ADAPT_RTT_US: u64 = 400_000;
+        const ADAPT_HEALTHY_US: u64 = 200_000;
+        const ADAPT_BACK_TICKS: u32 = 60; // 30 s healthy before restoring
+        const ADAPT_OPUS_BITRATE: i32 = 48_000;
         let mesh_key: Option<Arc<crate::net::crypto::MeshKey>> = config
             .password
             .as_ref()
@@ -1025,11 +1040,86 @@ fn run_mesh_sender(
         // Heartbeat (F10): request every 500 ms, drain echoes every tick,
         // and publish the rolling path health for the snapshot/UI.
         hb_counter += 1;
+        // F15: every 5 s, advertise our node table to every peer and promote
+        // freshly learned nodes into senders (mDNS-free mesh healing).
+        let gossip_due = hb_counter % (crate::net::udp::HB_TICKS as u32 * 10) == 0;
+        if gossip_due {
+            let known: Vec<(String, SocketAddr)> = current
+                .values()
+                .filter(|peer| !peer.id.is_empty() && peer.id != node_id)
+                .map(|peer| (peer.id.clone(), peer.addr))
+                .collect();
+            let self_addr: SocketAddr = bind
+                .parse()
+                .unwrap_or_else(|_| "127.0.0.1:47900".parse().unwrap());
+            let datagram = crate::net::udp::build_gossip(&node_id, self_addr, &known);
+            for sender in senders.values_mut() {
+                let _ = sender.send_packet(&datagram);
+            }
+            for (id, addr) in shared.gossip.fresh(Duration::from_secs(30)) {
+                if id == node_id {
+                    continue;
+                }
+                let already = current.values().any(|peer| peer.id == id);
+                if !already {
+                    log::info!("mesh: gossip learned node {id} at {addr}");
+                    peers.lock().unwrap().insert(
+                        addr.to_string(),
+                        SendPeer {
+                            name: "gossip".into(),
+                            id: id.clone(),
+                            addr,
+                            bit: None,
+                            bt: None,
+                            pinned: false,
+                            last_seen: Instant::now(),
+                        },
+                    );
+                }
+            }
+        }
         let refresh_routes = hb_counter % (crate::net::udp::HB_TICKS as u32 * 60) == 0;
         for (endpoint, sender) in senders.iter_mut() {
             sender.poll_heartbeat();
             if hb_counter % (crate::net::udp::HB_TICKS as u32) == 0 {
                 sender.send_heartbeat();
+            }
+            // F5: degrade to Opus when the path stays slow, restore when it
+            // has been healthy for a while. The switch keeps the stream id
+            // and sequence, so the receiver hears a carrier-style change.
+            let health = sender.path_health();
+            if health.samples >= 4 {
+                let entry = adaptive.entry(endpoint.clone()).or_insert(0);
+                if *entry == 0 {
+                    if health.rtt_p99_us > ADAPT_RTT_US {
+                        *entry += 1;
+                    } else {
+                        *entry = 0;
+                    }
+                    if *entry >= 2 && sender.codec() != Codec::Opus {
+                        match sender.set_codec(Codec::Opus, Some(ADAPT_OPUS_BITRATE)) {
+                            Ok(()) => log::info!(
+                                "mesh: {endpoint} degraded (rtt p99 {:.0} ms) — switching to Opus {}",
+                                health.rtt_p99_us as f64 / 1000.0,
+                                ADAPT_OPUS_BITRATE
+                            ),
+                            Err(error) => log::warn!("mesh: adaptive switch failed: {error}"),
+                        }
+                    }
+                } else {
+                    if health.rtt_p99_us <= ADAPT_HEALTHY_US {
+                        *entry += 1;
+                        if *entry - 1 >= ADAPT_BACK_TICKS && sender.codec() != codec {
+                            match sender.set_codec(codec, None) {
+                                Ok(()) => log::info!("mesh: {endpoint} recovered — restoring {}", codec.as_str()),
+                                Err(error) => log::warn!("mesh: adaptive restore failed: {error}"),
+                            }
+                            adaptive.insert(endpoint.clone(), 0);
+                        }
+                    } else {
+                        *entry = 1;
+                    }
+                }
             }
             if refresh_routes {
                 // F13: Wi-Fi off->on leaves the connected socket pinned to
@@ -1197,6 +1287,24 @@ fn run_discovery_loop(
                 for peer in &found {
                     if peer.role != "mesh" {
                         continue;
+                    }
+                    // F16: a peer speaking a NEWER mesh protocol than us may
+                    // emit frames we cannot parse — skip it (older peers and
+                    // proto-less legacy peers are accepted).
+                    if let Some(proto) = peer.proto {
+                        if proto > crate::protocol::MESH_PROTO_VERSION {
+                            static PROTO_SKIP_LOGGED: std::sync::atomic::AtomicU64 =
+                                std::sync::atomic::AtomicU64::new(0);
+                            if PROTO_SKIP_LOGGED.fetch_add(1, Ordering::Relaxed) < 4 {
+                                log::warn!(
+                                    "mesh: skipping {} ({}) — protocol {proto} > ours {}",
+                                    peer.name,
+                                    peer.id,
+                                    crate::protocol::MESH_PROTO_VERSION
+                                );
+                            }
+                            continue;
+                        }
                     }
                     // Filter self: TXT id, or same port with no id (defensive).
                     if peer.id == node_id
@@ -1485,5 +1593,98 @@ mod tests {
         }
         assert!(!node_a.is_running());
         assert!(!node_b.is_running());
+    }
+
+
+    fn test_mesh_snapshot() -> MeshSnapshot {
+        // A stopped engine still yields the full snapshot shape.
+        let mut config = MeshConfig::default();
+        config.bind = "127.0.0.1".into();
+        config.port = 0;
+        config.node_id = Some("aaaaaaaaaaaa0001".into());
+        config.discovery = false;
+        config.advertise = false;
+        config.output = false;
+        let engine = MeshEngine::start(config).expect("engine for snapshot");
+        let mut snapshot = engine.snapshot();
+        // Fabricate one stream entry so the per-stream contract is exercised.
+        snapshot.center.streams.push(crate::metrics::StreamSnapshot {
+            id: 1,
+            origin: 0xAAAA_0000_0000_0002,
+            stream_id: 7,
+            label: "test".into(),
+            addr: "127.0.0.1:1".into(),
+            path: "wifi".into(),
+            spectrum: vec![0.0; 32],
+            codec: "s16".into(),
+            active: true,
+            gain_db: 0.0,
+            muted: false,
+            rms_db: -20.0,
+            peak_db: -12.0,
+            peak_hold_db: -12.0,
+            buffer_ms: 30.0,
+            target_ms: 30.0,
+            buffer_max_ms: 70.0,
+            ratio: 1.0,
+            underruns: 0,
+            underrun_frames: 0,
+            buffer_resets: 0,
+            packets: 10,
+            lost_frames: 0,
+            plc_frames: 0,
+            overflow_packets: 0,
+            clicks: 0,
+            age_ms: 1,
+        });
+        snapshot
+    }
+
+    #[test]
+    fn snapshot_json_contract_is_stable() {
+        // F20: the WebUI/FFI JSON contract, pinned by assertions. Numeric
+        // u64 identity fields must serialize as 16-char hex (JS precision);
+        // UI-visible fields added over time must keep their names. Breaking
+        // any of these breaks the panels silently.
+        let mut node = test_mesh_snapshot();
+        node.center.streams.retain(|_| true);
+        let json = serde_json::to_string(&node).expect("snapshot serializes");
+        let value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+
+        let stream = &value["center"]["streams"][0];
+        assert_eq!(
+            stream["origin"].as_str().map(|s| s.len()),
+            Some(16),
+            "origin must be a 16-char hex string"
+        );
+        for field in [
+            "packets",
+            "lost_frames",
+            "plc_frames",
+            "overflow_packets",
+            "clicks",
+            "underruns",
+            "buffer_resets",
+            "buffer_ms",
+            "buffer_max_ms",
+            "age_ms",
+            "codec",
+            "path",
+        ] {
+            assert!(stream.get(field).is_some(), "stream.{field} missing from JSON contract");
+        }
+        for field in ["silent_ms", "first_frame_epoch_us", "kbps", "tx_rms_db"] {
+            assert!(
+                value["sender"].get(field).is_some(),
+                "sender.{field} missing from JSON contract"
+            );
+        }
+        for field in ["links", "state", "role", "tx_bytes", "rx_bytes", "gap_p99_ms"] {
+            assert!(value["bt"].get(field).is_some(), "bt.{field} missing from JSON contract");
+        }
+        assert!(value["peers"].is_array(), "peers must be an array (rtt_ms/loss_pct live per peer)");
+        for field in ["running", "peers", "topology", "bt", "sender", "center", "error"] {
+            assert!(value.get(field).is_some(), "snapshot.{field} missing");
+        }
     }
 }

@@ -73,6 +73,9 @@ pub struct CenterConfig {
     /// F6: group password. When set, every Wi-Fi datagram is AEAD-sealed.
     #[serde(skip)]
     pub password: Option<String>,
+    /// F15: gossip table for mesh peer discovery without mDNS.
+    #[serde(skip)]
+    pub gossip: Option<Arc<crate::net::udp::GossipTable>>,
     /// Local Bluetooth adapter address advertised over mDNS.
     pub bt: Option<String>,
     /// RFCOMM channel advertised over mDNS.
@@ -99,6 +102,7 @@ impl Default for CenterConfig {
             mix_tap: None,
             bt_exempt_ports: Vec::new(),
             password: None,
+            gossip: None,
         }
     }
 }
@@ -206,6 +210,7 @@ impl CenterEngine {
                     mix_tap: config.mix_tap.clone(),
                     bt_exempt_ports: config.bt_exempt_ports.clone(),
                     key: config.password.as_ref().map(|pw| std::sync::Arc::new(crate::net::crypto::MeshKey::from_password(pw))),
+                    gossip: config.gossip.clone(),
                 },
                 control.clone(),
             )?;

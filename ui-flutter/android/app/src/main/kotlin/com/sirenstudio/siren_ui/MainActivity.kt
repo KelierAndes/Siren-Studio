@@ -65,6 +65,21 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         nativeSetContext(applicationContext, this)
+        // F12: hold a mediaPlayback foreground service for the whole app
+        // lifetime so backgrounding does not freeze the mesh.
+        try {
+            SirenPlaybackService.start(this)
+        } catch (error: Throwable) {
+            Log.w("siren", "playback service start failed: ${error.message}")
+        }
+    }
+
+    override fun onDestroy() {
+        try {
+            SirenPlaybackService.stop(this)
+        } catch (_: Throwable) {
+        }
+        super.onDestroy()
     }
 
     // ---- Bluetooth: automatic leaf link, no user-facing transport choice --

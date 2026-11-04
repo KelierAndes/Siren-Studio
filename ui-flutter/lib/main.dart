@@ -7,16 +7,26 @@ import 'package:window_manager/window_manager.dart';
 import 'app_model.dart';
 import 'rust_api.dart';
 import 'theme.dart';
+import 'tantrum/model.dart';
+import 'tantrum/tantrum_page.dart';
 import 'ui_kit/siren_page.dart';
 
-Future<void> main() async {
+/// `--ui=tantrum` 或 SIREN_UI=tantrum 打开新控制台（纯 UI，不接引擎）。
+bool _tantrumRequested(List<String> args) =>
+    args.any((a) => a == '--ui=tantrum') ||
+    Platform.environment['SIREN_UI'] == 'tantrum';
+
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
-  try {
-    rust = RustApi.load();
-    rust.initLogging();
-  } catch (error) {
-    runApp(_BootstrapError(message: '$error'));
-    return;
+  final tantrum = _tantrumRequested(args);
+  if (!tantrum) {
+    try {
+      rust = RustApi.load();
+      rust.initLogging();
+    } catch (error) {
+      runApp(_BootstrapError(message: '$error'));
+      return;
+    }
   }
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
     await windowManager.ensureInitialized();
@@ -35,27 +45,34 @@ Future<void> main() async {
       await windowManager.focus();
     });
   }
-  runApp(const SirenApp());
+  runApp(SirenApp(tantrum: tantrum));
 }
 
 class SirenApp extends StatefulWidget {
-  const SirenApp({super.key});
+  const SirenApp({super.key, this.tantrum = false});
+
+  /// true 时只渲染新控制台，不创建 AppModel、不碰 FFI
+  final bool tantrum;
 
   @override
   State<SirenApp> createState() => _SirenAppState();
 }
 
 class _SirenAppState extends State<SirenApp> {
-  late final AppModel _model;
+  late final AppModel? _model;
+  final TantrumModel _tantrumModel = TantrumModel();
   AppLifecycleListener? _lifecycle;
 
   @override
   void initState() {
     super.initState();
+    if (widget.tantrum) {
+      return;
+    }
     _model = AppModel();
     _lifecycle = AppLifecycleListener(
       onExitRequested: () async {
-        await _model.shutdown();
+        await _model?.shutdown();
         return AppExitResponse.exit;
       },
     );
@@ -64,7 +81,7 @@ class _SirenAppState extends State<SirenApp> {
   @override
   void dispose() {
     _lifecycle?.dispose();
-    _model.dispose();
+    _model?.dispose();
     super.dispose();
   }
 
@@ -74,7 +91,9 @@ class _SirenAppState extends State<SirenApp> {
       title: 'SirenStudio',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
-      home: SirenPage(model: _model),
+      home: widget.tantrum
+          ? TantrumPage(model: _tantrumModel)
+          : SirenPage(model: _model!),
     );
   }
 }

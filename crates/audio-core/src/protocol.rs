@@ -37,6 +37,10 @@ pub const VERSION_MIX: u8 = 4;
 pub const HEADER_LEN_MIX: usize = 28;
 /// Reserved stream id for a hub-built N-1 mix carried over Bluetooth.
 pub const MIX_STREAM_ID: u16 = 0xFFF0;
+/// F16: mesh protocol version advertised in mDNS TXT (`proto`). Peers that
+/// advertise a HIGHER version are ignored (unknown frame formats); older
+/// peers are accepted for backward compatibility.
+pub const MESH_PROTO_VERSION: u8 = 3;
 /// Payload is fixed-size stereo f32.
 pub const RAW_FRAME_BYTES_PER_SAMPLE_FRAME: usize = SAMPLE_BYTES * CHANNELS;
 

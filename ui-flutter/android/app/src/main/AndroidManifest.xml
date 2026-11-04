@@ -18,6 +18,9 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
+    <!-- F12: keep capture/playback/mesh alive while the app is backgrounded. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- L1: never let any app (including this one) capture our playback.
          This is the app-wide equivalent of ALLOW_CAPTURE_BY_NONE and survives
          ROMs where AudioPlaybackCaptureConfiguration.excludeUid is ignored. -->
@@ -26,6 +29,12 @@
         android:name="${applicationName}"
         android:allowAudioPlaybackCapture="false"
         android:icon="@mipmap/ic_launcher">
+        <!-- F12: mediaPlayback foreground service keeps the mesh alive in
+             background; started/stopped from MainActivity. -->
+        <service
+            android:name=".SirenPlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback"/>
         <activity
             android:name=".MainActivity"
             android:exported="true"

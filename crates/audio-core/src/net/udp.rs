@@ -214,6 +214,23 @@ impl FramePacker {
     pub fn next_seq(&self) -> u32 {
         self.seq
     }
+
+    pub fn codec(&self) -> Codec {
+        self.codec
+    }
+
+    /// F5: switch the payload codec mid-stream, keeping the stream id and
+    /// the sequence timeline — the receiver sees a same-stream codec change
+    /// (its carrier-switch logic handles it) instead of a new stream.
+    pub fn switch_codec(&mut self, codec: Codec, bitrate: Option<i32>) -> Result<()> {
+        if self.codec == codec {
+            return Ok(());
+        }
+        let mut replacement = Self::with_stream(codec, self.frame_ms, self.origin, self.stream_id, bitrate)?;
+        replacement.seq = self.seq;
+        *self = replacement;
+        Ok(())
+    }
 }
 
 impl UdpSender {
@@ -320,6 +337,15 @@ impl UdpSender {
     /// F6: enable AEAD sealing for every datagram this sender emits.
     pub fn set_key(&mut self, key: Arc<MeshKey>) {
         self.key = Some(key);
+    }
+
+    /// F5: switch the payload codec mid-stream (stream id + seq preserved).
+    pub fn set_codec(&mut self, codec: Codec, bitrate: Option<i32>) -> Result<()> {
+        self.packer.switch_codec(codec, bitrate)
+    }
+
+    pub fn codec(&self) -> Codec {
+        self.packer.codec()
     }
 
     /// Re-pin the connected socket's route (F13): a connected UDP socket
@@ -496,6 +522,113 @@ pub const CLICK_STEP: f32 = 0.5;
 
 pub use crate::format::RAMP_FRAMES;
 
+/// F15: peers gossip their known node table over the audio socket, so a
+/// mesh survives mDNS loss (AP isolation, IGMP snooping). Entries are
+/// `(node_id, listen address)`; the receiver merges them into the table and
+/// the mesh sender layer promotes fresh entries to senders.
+pub const GOSSIP_MAGIC: [u8; 4] = *b"GP01";
+pub const GOSSIP_MAX_ENTRIES: usize = 16;
+
+#[derive(Default)]
+pub struct GossipTable {
+    inner: std::sync::Mutex<HashMap<String, (SocketAddr, Instant)>>,
+}
+
+impl GossipTable {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Merge entries learned from a gossip datagram.
+    pub fn merge(&self, entries: Vec<(String, SocketAddr)>) {
+        let mut inner = self.inner.lock().unwrap();
+        for (id, addr) in entries {
+            if id.len() >= 16 {
+                inner.insert(id, (addr, Instant::now()));
+            }
+        }
+        // Keep the table bounded; drop stale entries beyond a minute.
+        inner.retain(|_, (_, at)| at.elapsed() < Duration::from_secs(60));
+        while inner.len() > 64 {
+            let oldest = inner
+                .iter()
+                .min_by_key(|(_, (_, at))| *at)
+                .map(|(id, _)| id.clone());
+            match oldest {
+                Some(id) => {
+                    inner.remove(&id);
+                }
+                None => break,
+            }
+        }
+    }
+
+    /// Fresh entries as `(node_id, addr)`.
+    pub fn fresh(&self, max_age: Duration) -> Vec<(String, SocketAddr)> {
+        let inner = self.inner.lock().unwrap();
+        inner
+            .iter()
+            .filter(|(_, (_, at))| at.elapsed() < max_age)
+            .map(|(id, (addr, _))| (id.clone(), *addr))
+            .collect()
+    }
+}
+
+impl std::fmt::Debug for GossipTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("GossipTable(..)")
+    }
+}
+
+/// Encode a gossip datagram: `GP01 | count | [id_len id ip port]...`.
+pub fn build_gossip(self_id: &str, self_addr: SocketAddr, peers: &[(String, SocketAddr)]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(4 + 1 + peers.len() * 24);
+    out.extend_from_slice(&GOSSIP_MAGIC);
+    let mut entries: Vec<(String, SocketAddr)> = peers.to_vec();
+    entries.insert(0, (self_id.to_string(), self_addr));
+    entries.truncate(GOSSIP_MAX_ENTRIES);
+    out.push(entries.len() as u8);
+    for (id, addr) in entries {
+        let ip = match addr.ip() {
+            std::net::IpAddr::V4(ip) => ip.octets(),
+            std::net::IpAddr::V6(_) => continue, // mesh is ipv4-only today
+        };
+        out.push(id.len() as u8);
+        out.extend_from_slice(id.as_bytes());
+        out.extend_from_slice(&ip);
+        out.extend_from_slice(&addr.port().to_be_bytes());
+    }
+    out
+}
+
+/// Parse a gossip datagram; `None` when malformed.
+pub fn parse_gossip(buf: &[u8]) -> Option<Vec<(String, SocketAddr)>> {
+    if buf.len() < 5 || buf[..4] != GOSSIP_MAGIC {
+        return None;
+    }
+    let count = buf[4] as usize;
+    let mut out = Vec::with_capacity(count.min(GOSSIP_MAX_ENTRIES));
+    let mut pos = 5;
+    for _ in 0..count {
+        if pos + 1 > buf.len() {
+            break;
+        }
+        let id_len = buf[pos] as usize;
+        pos += 1;
+        if id_len == 0 || id_len > 64 || pos + id_len + 6 > buf.len() {
+            return None;
+        }
+        let id = String::from_utf8_lossy(&buf[pos..pos + id_len]).to_string();
+        pos += id_len;
+        let ip = std::net::Ipv4Addr::new(buf[pos], buf[pos + 1], buf[pos + 2], buf[pos + 3]);
+        pos += 4;
+        let port = u16::from_be_bytes([buf[pos], buf[pos + 1]]);
+        pos += 2;
+        out.push((id, SocketAddr::new(std::net::IpAddr::V4(ip), port)));
+    }
+    Some(out)
+}
+
 /// `Some(true)` when the buffer carries an `SE` envelope of the current
 /// protocol version, `Some(false)` when it is plain, `None` if too short.
 fn datagram_check(buf: &[u8]) -> Option<bool> {
@@ -523,6 +656,8 @@ pub struct ReceiverConfig {
     /// F6: group-password key. When set, only `SE`-sealed datagrams are
     /// accepted (plain frames are treated as injection attempts).
     pub key: Option<Arc<MeshKey>>,
+    /// F15: gossip table; the receiver merges learned nodes into it.
+    pub gossip: Option<Arc<GossipTable>>,
 }
 
 /// Latest decoded audio per origin. A hub builds one mix per Bluetooth link
@@ -1009,6 +1144,15 @@ fn run(
                     buffer[..len].to_vec()
                 };
                 let len = datagram.len();
+                // F15: gossip datagrams merge into the shared table.
+                if len >= 5 && datagram[..4] == GOSSIP_MAGIC {
+                    if let Some(table) = &config.gossip {
+                        if let Some(entries) = parse_gossip(&datagram) {
+                            table.merge(entries);
+                        }
+                    }
+                    continue;
+                }
                 // Heartbeats ride on the same socket but are not frames:
                 // echo requests straight back, echoes are for the sender.
                 if len >= HB_LEN && datagram[..4] == HB_MAGIC {
@@ -1697,6 +1841,7 @@ mod tests {
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
                 key: None,
+                gossip: None,
             },
             control,
         )
@@ -1768,6 +1913,7 @@ mod tests {
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
                 key: None,
+                gossip: None,
             },
             control,
         )
@@ -1821,6 +1967,7 @@ mod tests {
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
                 key: None,
+                gossip: None,
             },
             control,
         )
@@ -1889,6 +2036,7 @@ mod tests {
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
                 key: None,
+                gossip: None,
             },
             control,
         )
@@ -1998,6 +2146,7 @@ mod tests {
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
                 key: None,
+                gossip: None,
             },
             control,
         )
@@ -2118,6 +2267,7 @@ mod tests {
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
                 key: None,
+                gossip: None,
             },
             control,
         )
@@ -2154,6 +2304,7 @@ mod tests {
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
                 key: None,
+                gossip: None,
             },
             control,
         )
@@ -2233,6 +2384,7 @@ mod tests {
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
                 key: None,
+                gossip: None,
             },
         )
         .unwrap();
@@ -2290,6 +2442,7 @@ mod tests {
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
                 key: None,
+                gossip: None,
             },
             control,
         )
@@ -2351,6 +2504,7 @@ mod tests {
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
                 key: None,
+                gossip: None,
             },
             control,
         )
@@ -2399,6 +2553,7 @@ mod tests {
                 mix_tap: None,
                 bt_exempt_ports: Vec::new(),
                 key: None,
+                gossip: None,
             },
             control,
         )
@@ -2446,5 +2601,32 @@ mod tests {
         );
         receiver.stop();
         drop(mixer);
+    }
+
+    #[test]
+    fn gossip_round_trip_and_cap() {
+        let peers: Vec<(String, SocketAddr)> = (0..20)
+            .map(|i| {
+                (
+                    format!("{:016x}", i as u64),
+                    SocketAddr::new(
+                        std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 2, i as u8 + 1)),
+                        47900 + i as u16,
+                    ),
+                )
+            })
+            .collect();
+        let datagram = build_gossip("aaaaaaaaaaaaaaaa", "127.0.0.1:47900".parse().unwrap(), &peers);
+        let parsed = parse_gossip(&datagram).expect("well-formed gossip");
+        // Self + 15 peers (capped), self first.
+        assert_eq!(parsed.len(), GOSSIP_MAX_ENTRIES);
+        assert_eq!(parsed[0].0, "aaaaaaaaaaaaaaaa");
+        assert_eq!(parsed[0].1.port(), 47900);
+        // Malformed: truncated payload.
+        assert!(parse_gossip(&datagram[..datagram.len() - 4]).is_none());
+        let table = GossipTable::new();
+        table.merge(parsed);
+        let fresh = table.fresh(Duration::from_secs(10));
+        assert!(fresh.len() >= GOSSIP_MAX_ENTRIES - 1, "self entry included");
     }
 }

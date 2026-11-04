@@ -129,7 +129,7 @@ class TantrumMetrics {
 
   /// 参考图 1 的像素基准是 455 宽，这里把它归一化成 1.0
   final double scale;
-  final double _s => scale;
+  double get _s => scale;
 
   double get radius => 14 * _s;
   double get inset => 8 * _s;
@@ -140,17 +140,18 @@ class TantrumMetrics {
   double get bodyTop => 45 * _s;
   double get bodyHeight => 100 * _s;
   double get readoutTop => 150 * _s;
-  double get readoutHeight => 30 * _s;
-  double get controlTop => 186 * _s;
-  double get controlHeight => 58 * _s;
+  double get readoutHeight => 26 * _s;
+  double get controlTop => 176 * _s;
+  double get controlHeight => 74 * _s;
 
   /// 左屏 : 右格栅 = 0.54 : 0.42，中间留 0.02 的缝
   double get screenWidth => (width - 2 * inset) * 0.545;
   double get grilleWidth => (width - 2 * inset) * 0.415;
   double get paneGap => (width - 2 * inset) * 0.04;
 
-  // 旋钮：直径 44，刻度环半径 = 半径 × 1.14，指示槽在 0.94 半径处
-  double get knobDiameter => 44 * _s;
+  // 旋钮：直径 40，刻度环半径 = 半径 × 1.14，指示槽在 0.86 半径处
+  double get knobDiameter => 40 * _s;
+  double get knobBoxHeight => knobDiameter + 8 * _s;
   double get knobRingRadius => knobDiameter / 2 * 1.14;
   double get knobNotchRadius => knobDiameter / 2 * 0.86;
   double get knobNotchLength => 11 * _s;
@@ -158,21 +159,24 @@ class TantrumMetrics {
   double get tickCount => 27;
   double get tickRadius => 1.5 * _s;
 
-  /// 旋钮中心横向：参考图 1 是 157/231/388/467/545，中间夹一组上下箭头 + 胶囊
+  /// 旋钮中心横向：参考图 1 实测在面板内 x = 22/96/253/332/410（面板宽 455）。
+  /// 首尾各内收 6，避免刻度环被面板圆角裁掉。
   List<double> get knobCenters => [
-        157 / 455 * width,
-        231 / 455 * width,
-        388 / 455 * width,
-        467 / 455 * width,
-        545 / 455 * width,
+        28 / 455 * width,
+        96 / 455 * width,
+        253 / 455 * width,
+        332 / 455 * width,
+        408 / 455 * width,
       ];
-  double get centerClusterX => 309 / 455 * width;
+
+  /// 中间箭头 + 胶囊：落在第 2、3 个旋钮的正中
+  double get centerClusterX => 174 / 455 * width;
   double get labelY => controlTop + 4 * _s;
   double get knobCenterY => controlTop + 30 * _s;
   double get valueY => controlTop + 52 * _s;
 
   // 推子（图2：帽 26×13、槽宽 5、行程 120）
-  double get faderTravel => 62 * _s;
+  double get faderTravel => 58 * _s;
   double get faderSlotWidth => 5 * _s;
   double get faderCapWidth => 26 * _s;
   double get faderCapHeight => 13 * _s;

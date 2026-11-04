@@ -85,6 +85,7 @@ pub fn run(args: CenterArgs) -> Result<()> {
             mix_tap: None,
             bt_exempt_ports: Vec::new(),
             key: None,
+            gossip: None,
         },
         mixer_control,
     )?;

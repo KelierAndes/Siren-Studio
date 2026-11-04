@@ -579,3 +579,17 @@ python scripts/verify_e2e.py
 - **选举签名**：mDNS TXT 增加 `sig = hex(HMAC-SHA256(psk, id|bit|bt|btch))`。持密码节点验证后信选举凭据；无效/缺失签名的对端**剥除 bit/bt**（可继续收发但无法当选 hub、不被拨号）——密码攻击者无法注入音频（AEAD 拒收）也无法接管选举。
 - **WebUI**：默认绑 `127.0.0.1:8080`（暴露到 LAN 需显式 `--listen`）；密码存服务端 `Inner`，不随 UiConfig 序列化到浏览器。
 - 单测：`net/crypto.rs`（封/开、错密码、防篡改、签名绑定字段）+ link_sim 端到端（同密码通、错密码 0 包）。
+
+## 18. 规模上限（F14，2026-11-05 实测/推算依据）
+
+| 维度 | 上限 | 依据 |
+| :-- | :-- | :-- |
+| 混音源数（N−1 掩码） | 64 路 | v4 混音掩码为 64 位 origin 掩码 |
+| 接收流数 | `max_streams`（默认 32，CLI/WebUI 可调） | mixer slot 数 |
+| 蓝牙 hub 链路 | 2–3 条 ACL | 经典蓝牙 piconet 主设备角色上限；实测每流 44→38 kbps（v3 头）× 6 条单向流 ≈ 420 kbps 已接近双从 piconet 有效空口 |
+| gossip 表 | 64 节点 / 条目 30 s 有效 | `GossipTable` 硬上限，防泛洪 |
+| 单流带宽（Wi-Fi） | s16 ≈ 1.58 Mbps；Opus 48k ≈ 0.35 Mbps | 5 ms 帧 × 200 pps |
+| 全互联单播 | 建议 ≤6 节点 | O(N²) 带外流量；更大规模需要链式/子网划分（未实现，见 F5 备注） |
+| 帧长 | 1–60 ms（Opus 限 5/10/20/40/60） | `MeshEngine::start` 校验 |
+
+超限行为：第 65 路 origin 不进 N−1 掩码（混音转发缺源，直连流不受影响）；`max_streams` 满时新流被拒（`cannot accept stream` 计数）；BT hub 第 4 条链路拨号失败进退避。
