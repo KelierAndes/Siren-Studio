@@ -907,6 +907,12 @@ fn run_mesh_sender(
                 sender.refresh_route();
             }
             let health = sender.path_health();
+            if hb_counter % (crate::net::udp::HB_TICKS as u32 * 40) == 0 {
+                let (sent, lost, samples) = sender.heartbeat_counts();
+                log::debug!(
+                    "hb → {endpoint}: sent {sent}, unanswered {lost}, samples {samples}"
+                );
+            }
             shared
                 .health
                 .lock()

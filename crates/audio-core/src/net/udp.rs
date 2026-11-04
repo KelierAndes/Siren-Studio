@@ -89,8 +89,12 @@ pub struct UdpSender {
     fail_streak: u32,
     dead_until: Option<Instant>,
     last_fail_log: Option<Instant>,
-    // Heartbeat (F10): request every HB_TICKS ticks, echo comes back from
-    // the peer's bind socket into this connected socket.
+    // Heartbeat (F10): request every HB_TICKS ticks. It rides its own
+    // **unconnected** socket: a multi-homed peer answers from whichever
+    // address its route picks, and a connected socket silently drops that
+    // echo (probe to .159, reply from .196) — the RTT then stays empty even
+    // though the peer is answering.
+    hb_socket: UdpSocket,
     hb_window: std::collections::VecDeque<u64>,
     hb_pending: Option<u64>,
     hb_sent: u64,
@@ -223,8 +227,11 @@ impl UdpSender {
         };
         socket.connect(socket_target)?;
         socket.set_nonblocking(true).ok();
+        let hb_socket = UdpSocket::bind("0.0.0.0:0")?;
+        hb_socket.set_nonblocking(true).ok();
         Ok(Self {
             socket,
+            hb_socket,
             target: socket_target,
             packer: FramePacker::new(codec, frame_ms, origin)?,
             bytes_sent: 0,
@@ -258,7 +265,7 @@ impl UdpSender {
         buf[..4].copy_from_slice(&HB_MAGIC);
         buf[4..12].copy_from_slice(&ts.to_le_bytes());
         buf[12] = HB_REQUEST;
-        if self.socket.send(&buf).is_ok() {
+        if self.hb_socket.send_to(&buf, self.target).is_ok() {
             self.hb_pending = Some(ts);
             self.hb_sent += 1;
         }
@@ -269,7 +276,7 @@ impl UdpSender {
     pub fn poll_heartbeat(&mut self) -> bool {
         let mut got = false;
         let mut buf = [0u8; HB_LEN];
-        while let Ok(len) = self.socket.recv(&mut buf) {
+        while let Ok((len, _from)) = self.hb_socket.recv_from(&mut buf) {
             if len >= HB_LEN && buf[..4] == HB_MAGIC && buf[12] == HB_ECHO {
                 let ts = u64::from_le_bytes(buf[4..12].try_into().unwrap_or([0; 8]));
                 if self.hb_pending.map(|pending| pending == ts).unwrap_or(false) {
@@ -283,6 +290,11 @@ impl UdpSender {
             }
         }
         got
+    }
+
+    /// 心跳的发送/失败/已采样数，用于诊断"RTT 为什么是空"。
+    pub fn heartbeat_counts(&self) -> (u64, u64, usize) {
+        (self.hb_sent, self.hb_lost, self.hb_window.len())
     }
 
     /// Current rolling health of this path (zeros until samples exist).
@@ -2024,6 +2036,44 @@ mod tests {
         assert_eq!(health.loss_pct, 0.0);
         receiver.stop();
         let _ = mixer;
+    }
+
+    #[test]
+    fn heartbeat_accepts_an_echo_from_another_address_of_the_same_peer() {
+        // A multi-homed node advertises one address over mDNS but the kernel
+        // answers from whichever address routes back (probe → .159, reply ←
+        // .196). A connected socket drops that echo, so the heartbeat must not
+        // ride the audio socket.
+        let advertised = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let elsewhere = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let mut sender = UdpSender::new(advertised.local_addr().unwrap(), Codec::RawF32, 5, 0x1234)
+            .unwrap();
+        sender.send_heartbeat();
+
+        let mut probe = [0u8; HB_LEN];
+        let (len, from) = advertised
+            .recv_from(&mut probe)
+            .expect("probe should reach the advertised address");
+        assert_eq!(len, HB_LEN);
+        assert_eq!(&probe[..4], &HB_MAGIC);
+        assert_eq!(probe[12], HB_REQUEST);
+        let mut echo = [0u8; HB_LEN];
+        echo[..4].copy_from_slice(&HB_MAGIC);
+        echo[4..12].copy_from_slice(&probe[4..12]);
+        echo[12] = HB_ECHO;
+        // Reply from a different local address/port, as a second NIC would.
+        elsewhere.send_to(&echo, from).unwrap();
+
+        let mut measured = false;
+        for _ in 0..100 {
+            if sender.poll_heartbeat() {
+                measured = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(measured, "an echo from another address must still count");
+        assert!(sender.path_health().samples >= 1);
     }
 
     #[test]
