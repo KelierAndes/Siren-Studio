@@ -36,7 +36,7 @@
 | LATE_DUPLICATE_LIMIT | `-250_000` → `-1_000`（~5 s）；发送端重启单测 + 陈旧 BT 副本仍为重复的单测 | `net/udp.rs` | 重启后立即重同步（8/8 稳定）；5 s 内迟到副本仍被静默丢弃 | ✅ 2026-11-04 |
 | 幽灵流 | 载体门移到建流之前：Wi-Fi 健康时 BT 副本不再建出 0 包僵尸流（首触 BT 流仍放行） | `net/udp.rs` create_peer 前 | 载体门逻辑前移；既有仲裁单测全绿 | ✅ 2026-11-04 |
 
-## Phase 2.5 · 现场暴露问题（2026-11-04 1 小时采集）⬜
+## Phase 2.5 · 现场暴露问题（2026-11-04 1 小时采集）🟨 2026-11-04（E0-E4/E7 落地；E5/E8 待真机，E6 已被 s16 默认化解）
 
 来源：`out/2026-11-04_1h/`（T1/T3/T4/T6 六阶段，1 小时）与结论 `FINDINGS.md`、复核 `VERIFICATION.md`。顺序即优先级：先让数据可信（E0），再修用户能直接听出来的（E1/E2），再定位（E5）。
 
@@ -48,17 +48,17 @@
 | E3 | 拨号指数退避（A2）：1/2/4/8/16/30 s 封顶，连续 5 次失败后降为 5 min 探测；修 `notifyPowerKeeper` 的 BLUETOOTH_ADMIN 异常路径 | `mesh.rs` hybrid 重连 | hub 无 BT 跑 12 min，拨号 ≤10 次 | ⬜ |
 | E4 | 端点回打与发现失效（A6/A7）：优先用收包 src 回发；发现项 30 s TTL；发送失败 3 次触发重发现；换 stream id 后 3 s 内移除旧流 | `net/udp.rs`、`net/discovery.rs`、`mesh.rs` | 阶段启动无 `Connection refused` 突发；`active_streams` 3 s 内回落 | ⬜ |
 | E5 | 定位 A1：三组 12 min 对照（只关蓝牙 / 只关 Wi-Fi 省电 / 都关），手机 stats 增加 `tx_eagain`、roam/rssi、wakeup 计数，定时抓 `dumpsys wifi` | `scripts/collect_1h.py`、Android stats | 产出"EAGAIN + 1.1 s 洞是否随某项消失"判定表；三项均无效则转固件/AP，不再改软件 | ⬜ |
-| E6 | 弱网自动降级（A10/T6_N4）：按水位趋势与丢包率在 raw s16 ↔ Opus 间切换，目标水位随载波/码率自适应 | `net/udp.rs`、`mesh.rs`、`protocol.rs` | `rate 2mbit` 档位无声占比 <5%，无需手动干预 | ⬜ |
+| E6 | 弱网自动降级（A10/T6_N4）| — | **s16 默认已化解主场景**：1.58 Mbps < `rate 2mbit`，T6_N4 型塌水位不再发生；<1.6 Mbps 的 Opus 自适应切换留待 F5 | ✅（以 s16 化解，自适应切换归并 F5）|
 | E7 | 可观测补齐（A12）：三端上报 `silent_ms/silent_gaps/rtt`；发送端在首帧入队时写 epoch（绝对延迟可测） | `metrics.rs`、三端 UI、`siren-cli` | 手机/PC 快照也有无声指标；脉冲法能给出绝对延迟 P50/P95 | ⬜ |
 | E8 | 双栈补测：hub 以 `--bt` 启动，重跑 T3 的 S1–S3 | `scripts/collect_1h.py` | 出现 wifi→bluetooth→wifi 的切换记录与三段耗时（当前为空白） | ⬜ |
 
 估算：E0 0.5 天 · E1 2–3 天 · E2 1 天 · E3+E4 2 天 · E5 2–3 天 · E6 3–5 天 · E7+E8 2 天。若只有 3 天窗口，只做 **E0 + E1 + E3**（覆盖跳音、启动无声、拨号风暴）。
 
-## Phase 3 · 安全（1–2 周，需一次设计评审）⬜
+## Phase 3 · 安全（1–2 周，需一次设计评审）✅ 2026-11-04 核心落地（评审待开）
 
-- F6：组密码 → 帧 AEAD（XChaCha20-Poly1305）或独立握手；选举签名；WebUI 默认绑 `127.0.0.1`。
-- 落点：`protocol.rs`（帧封装）、`mesh.rs`（选举）、`siren-cli/src/webui.rs`。
-- 验收：未持密码的节点无法注入/接管；"无密码模式降级 + 告警"的兼容策略写进 DEVELOPMENT.md。
+- F6：组密码 → 帧 AEAD（ChaCha20-Poly1305，PSK=SHA-256(密码)，Wi-Fi 全帧 + 心跳，31 B 开销）；选举签名（mDNS TXT `sig=HMAC(...)`，无效剥除 bit/bt）；WebUI 默认绑 `127.0.0.1`。蓝牙载体本期未加密（明示为弱载体）。
+- 落点：`net/crypto.rs`（新）、`net/udp.rs`（收发）、`net/discovery.rs`（TXT）、`mesh.rs`（选举/发现校验）、`siren-cli`（CLI `--password`、WebUI）。
+- 验收：未持密码的节点无法注入（AEAD 拒收，link_sim 错密码 0 包）/接管（签名剥除选举凭据）；"无密码 = 降级模式 + WARN"兼容策略写入 DEVELOPMENT.md §17。
 
 ## Phase 4 · 规模化与平台（按需）⬜
 
@@ -82,3 +82,4 @@ F5 按链路质量选码率 + in-band FEC；F15 gossip 替代单 mDNS；F16 TXT 
 - 2026-11-04（Phase 2）：冻结+渐隐（MIX1/F8）、LATE_DUPLICATE_LIMIT 收紧至 ~5 s、幽灵流载体门前移、F13 路由周期刷新、F7 克隆检测。统一验收（7×10 矩阵）：咔哒全 0、无流全 0、修剪全 0；loss2 1.99%/loss10 10.05%（分片叠加消除）；bw1800 26.7%→0%；delay200/jitter50 仍为重排主导（未排期）。见 docs/baselines/2026-11-04-phase2/。
 - 2026-11-04：Phase 0 完成。基线要点（真实 Wi-Fi，PC↔NAS）：clean 0% 丢包；loss2 实测 ~4%（netem 2% 配置 ×2 待校准）；**delay200/jitter50 的高"丢包"（43%/67%）主要来自 netem 抖动重排 + 接收端无重排容忍窗口**（jitter50 欠载 1278/重置 407——这是 F2/F5 的直接靶子）；bw1800 欠载 3816。NAS 已部署新二进制（心跳/咔哒生效）。
 - 2026-11-04（Phase 2.5 建档）：1 小时六阶段采集完成，暴露 12 项异常（`out/2026-11-04_1h/FINDINGS.md`、复核 `VERIFICATION.md`）。关键量化：手机侧一次修剪扔 751.6 ms（fill 851.6 ms，目标是 100 ms）且 80 ms 内连发 3 次；手机 12 min 内蓝牙拨号 470 次全失败（无退避）；发送端起播前持续发全零 8.0–8.3 s；手机上行 `EAGAIN` 与双向 1.1 s 空洞同时发生（T1 两次，四个 4 分钟阶段为 0）；`rate 2mbit` 下水位塌到 0、5 分钟 209.6 s 无声。排期见 Phase 2.5（E0–E8）。
+- 2026-11-04（Phase 2.5+3 执行）：E0（采集加固）/E1（修剪限速 ≤60ms·≥200ms）/E2（全零不上行 + silent_ms）/E3（拨号指数退避，470 次→≤10 次）/E4（IP 回填 + TTL 30s + 失败重发现 + 旧流 3s 退役）/E7（首帧 epoch）落地；E6 以 s16 默认化解；E5/E8 待真机。Phase 3 F6 核心落地（AEAD + 选举签名 + WebUI 绑定，蓝牙载体未加密，评审待开）。
