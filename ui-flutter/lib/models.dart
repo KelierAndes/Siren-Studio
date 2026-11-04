@@ -1,4 +1,5 @@
 double _d(dynamic value) => value is num ? value.toDouble() : 0.0;
+double? _dn(dynamic value) => value is num ? value.toDouble() : null;
 int _i(dynamic value) => value is num ? value.toInt() : 0;
 bool _b(dynamic value) => value == true;
 String _s(dynamic value, [String fallback = '']) => value is String ? value : fallback;
@@ -278,6 +279,9 @@ class MeshPeerState {
     required this.uid,
     required this.endpoint,
     required this.bt,
+    required this.rttMs,
+    required this.rttP99Ms,
+    required this.lossPct,
   });
 
   final String name;
@@ -285,6 +289,10 @@ class MeshPeerState {
   final String uid;
   final String endpoint;
   final String? bt;
+  /// Heartbeat path health to this node; null until the window has samples.
+  final double? rttMs;
+  final double? rttP99Ms;
+  final double? lossPct;
 
   /// mDNS advertises the role suffix; panels show the plain device name.
   String get displayName {
@@ -301,6 +309,9 @@ class MeshPeerState {
         uid: _s(json['uid']).toLowerCase(),
         endpoint: _s(json['endpoint']),
         bt: _sn(json['bt']),
+        rttMs: _dn(json['rtt_ms']),
+        rttP99Ms: _dn(json['rtt_p99_ms']),
+        lossPct: _dn(json['loss_pct']),
       );
 }
 

@@ -162,8 +162,7 @@ class SirenBinding {
       _counters.removeWhere((id, _) => !seen.contains(id));
       _lastIssue.removeWhere((id, _) => !seen.contains(id));
 
-      final curves = <EqCurve>[];
-      for (final stream in streams) {
+      final curves = <EqCurve>[];      for (final stream in streams) {
         // 0xFFF0 is the hub relay mix, not a device: it would swamp the chart.
         if (stream.streamId == 0xFFF0) continue;
         curves.add(
@@ -180,6 +179,12 @@ class SirenBinding {
       visual.setStreamPages((streams.length + 1) ~/ 2);
       visual.setStreamPage(visual.streamPage);
       _lastPage = visual.streamPage;
+
+      // 心跳按节点量测，流按 origin 归属节点，两者用 uid 对齐。
+      final latencyByUid = <String, MeshPeerState>{
+        for (final peer in mesh?.peers ?? const <MeshPeerState>[])
+          if (peer.uid.isNotEmpty) peer.uid: peer,
+      };
 
       final target = (mesh?.center.targetMs ?? app.lastTargetMs).clamp(10.0, 500.0);
       final master = (mesh?.center.masterGainDb ?? app.lastMasterGainDb).clamp(-60.0, 12.0);
@@ -198,12 +203,16 @@ class SirenBinding {
             health: 3,
             bufferMs: 0,
             bufferMaxMs: 0,
+            latencyMs: null,
+            latencyP99Ms: null,
+            lossPct: null,
           );
           channel.syncAmount(-60);
           channel.syncMute(false);
           channel.syncOn(false);
         } else {
           channel.setTitle(mesh!.streamName(stream));
+          final peer = latencyByUid[stream.origin];
           channel.setFacts(
             rms: stream.rmsDb,
             path: _pathLabel(stream.path),
@@ -212,6 +221,9 @@ class SirenBinding {
             health: health[stream.id] ?? 3,
             bufferMs: stream.bufferMs,
             bufferMaxMs: stream.bufferMaxMs,
+            latencyMs: peer?.rttMs,
+            latencyP99Ms: peer?.rttP99Ms,
+            lossPct: peer?.lossPct,
           );
           channel.syncAmount(stream.gainDb);
           channel.syncMute(stream.muted);

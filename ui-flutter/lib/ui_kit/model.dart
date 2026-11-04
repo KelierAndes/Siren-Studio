@@ -77,6 +77,10 @@ class ModuleChannel extends ChangeNotifier {
   /// Live buffer depth and its overflow-trim ceiling, in ms.
   double bufferMs = 0;
   double bufferMaxMs = 0;
+  /// Heartbeat path health to this stream's node; null until measured.
+  double? latencyMs;
+  double? latencyP99Ms;
+  double? lossPct;
   /// 0 good, 1 fair, 2 poor, 3 unknown/offline.
   int health = 3;
   /// Unit shown below the big knob (dB for gain, ms for a target).
@@ -181,14 +185,22 @@ class ModuleChannel extends ChangeNotifier {
     required int health,
     required double bufferMs,
     required double bufferMaxMs,
+    double? latencyMs,
+    double? latencyP99Ms,
+    double? lossPct,
   }) {
+    final sameLatency =
+        _near(this.latencyMs, latencyMs) &&
+        _near(this.latencyP99Ms, latencyP99Ms) &&
+        _near(this.lossPct, lossPct);
     if ((rmsDb - rms).abs() < .01 &&
         pathText == path &&
         lostFrames == lost &&
         underruns == under &&
         this.health == health &&
         (this.bufferMs - bufferMs).abs() < .5 &&
-        (this.bufferMaxMs - bufferMaxMs).abs() < .5) {
+        (this.bufferMaxMs - bufferMaxMs).abs() < .5 &&
+        sameLatency) {
       return;
     }
     rmsDb = rms;
@@ -198,6 +210,9 @@ class ModuleChannel extends ChangeNotifier {
     this.health = health;
     this.bufferMs = bufferMs;
     this.bufferMaxMs = bufferMaxMs;
+    this.latencyMs = latencyMs;
+    this.latencyP99Ms = latencyP99Ms;
+    this.lossPct = lossPct;
     notifyListeners();
   }
 
@@ -641,4 +656,10 @@ double noise01(double x) {
   final b = math.sin(x * 3.9 + 1.3) * .5 + .5;
   final c = math.sin(x * 8.3 + 2.7) * .5 + .5;
   return a * .55 + b * .3 + c * .15;
+}
+
+/// 心跳量测每 500 ms 更新一次，抖动远小于 1 ms 时不值得重绘。
+bool _near(double? a, double? b) {
+  if (a == null || b == null) return a == b;
+  return (a - b).abs() < 1.0;
 }

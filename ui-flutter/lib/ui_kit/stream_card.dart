@@ -169,7 +169,7 @@ class StreamCard extends StatelessWidget {
                               children: [
                                 Flexible(child: window),
                                 const SizedBox(height: 8),
-                                SizedBox(height: 62, child: facts),
+                                SizedBox(height: 80, child: facts),
                               ],
                             );
                           },
@@ -351,12 +351,23 @@ class _LevelBar extends StatelessWidget {
   }
 }
 
-/// 路径 / 丢帧 / 欠载，竖排三行。
+/// 路径 / 丢帧 / 欠载 / 延迟，竖排四行。
 class _Facts extends StatelessWidget {
   const _Facts({required this.palette, required this.channel});
 
   final MetalPalette palette;
   final ModuleChannel channel;
+
+  /// 心跳量测：P50/P99 往返，丢包只在非零时占位。
+  String get _latencyText {
+    final p50 = channel.latencyMs;
+    if (p50 == null) return '—';
+    final p99 = channel.latencyP99Ms;
+    final loss = channel.lossPct;
+    final span = p99 == null ? '${p50.round()}' : '${p50.round()}/${p99.round()}';
+    final tail = (loss == null || loss < 0.05) ? '' : ' ·${loss.round()}%';
+    return '$span ms$tail';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -364,7 +375,7 @@ class _Facts extends StatelessWidget {
       radius: 10,
       palette: palette,
       tint: palette.wellTint,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -372,6 +383,7 @@ class _Facts extends StatelessWidget {
           _row('路径', channel.pathText),
           _row('丢帧', '${channel.lostFrames}'),
           _row('欠载', '${channel.underruns}'),
+          _row('延迟', _latencyText),
         ],
       ),
     );
