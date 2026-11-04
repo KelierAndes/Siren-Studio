@@ -97,7 +97,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "audio-core"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "cpal",
  "hound",
@@ -1295,7 +1295,7 @@ checksum = "5974e397833d890f2f74963408e0d4a6cd8eda2f6a445ae06750291b5d7a997e"
 
 [[package]]
 name = "rust_lib_siren_ui"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "audio-core",
  "env_logger",
@@ -1449,7 +1449,7 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "siren-cli"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "audio-core",
