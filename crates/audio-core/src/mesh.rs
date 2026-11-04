@@ -931,8 +931,13 @@ fn run_mesh_sender(
                 if uid == 0 {
                     continue;
                 }
+                // The IP may only be replaced by a REAL Wi-Fi source: audio
+                // delivered through the Bluetooth tunnel arrives from the
+                // tunnel's loopback inject socket, and rewriting the peer to
+                // 127.0.0.1 pointed our downlink at ourselves (T-D finding).
+                // Liveness still counts for any carrier.
                 if let Some((addr, at)) = shared.mix_tap.last_addr(uid, Duration::from_secs(3)) {
-                    if addr.ip() != peer.addr.ip() {
+                    if !addr.ip().is_loopback() && addr.ip() != peer.addr.ip() {
                         log::info!(
                             "mesh: peer {} moved {} -> {} (from received audio)",
                             peer.name,
