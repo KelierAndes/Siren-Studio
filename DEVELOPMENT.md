@@ -408,6 +408,7 @@ bt: link quality: 2 link(s), tx 0.0 KB/s, rx 11.7 KB/s, write drops 0,
 
 - 设计 token 以 `ui-flutter/lib/theme.dart` 为准，Linux WebUI 的 CSS 变量（`--bg/--panel/--text/--muted/--teal/--blue/--amber/--red/--radius`）逐项对齐；卡片 18 px、控件 11–14 px、字体 `Segoe UI` + `Consolas`。
 - 流面板不再显示 `origin#stream`：快照同时给出 `origin`（u64，**16 位十六进制字符串**，避免 JS 精度丢失）与 `stream_id`，peer 给出 `uid`；三端按 `origin == uid` 映射到节点名，`stream_id == 0xFFF0` 标注“混音”，mDNS 的 ` (mesh)` 后缀在展示层剥离。
+- 链路延迟三端都显示：快照 `peers[].rtt_ms / rtt_p99_ms / loss_pct`（心跳量测，按节点 id 建键）在 PC 与 Android 的设备卡上渲染为第四行「延迟 P50/P99 ms」，丢包非零时追加；WebUI 每台设备一行，另在「组网」卡保留聚合值与「无声洞」。未测到显示 `—`，不显示 0；RTT 抖动小于 1 ms 不触发重绘。
 - 品牌资产统一：teal→blue 渐变圆角方块 + 深色波形。Windows 用多尺寸 `app_icon.ico` 且 `WNDCLASSEX` 同时设置 `hIcon/hIconSm`；Android 替换 mipmap 图标；WebUI 用同款内联 SVG favicon。
 
 ### 防回环（四层防线）
@@ -462,6 +463,17 @@ bt: link quality: 2 link(s), tx 0.0 KB/s, rx 11.7 KB/s, write drops 0,
 - `dsp/mixer.rs` 现在记住最后一次 `SetTargetMs`（`target_override`），在处理 `Add` 时应用到新流；单测 `target_set_before_a_stream_joins_applies_to_it` 覆盖。
 - 实测（手机 440 测试音 → PC，100 ms 目标）：PC 端手机流 **丢帧 0 / 欠载 0**；修复前同样链路 30 ms 下 12 分钟累计 10 次欠载。
 - PC/手机界面上的目标滑杆现在对“之后加入的流”同样生效；UI 的 `SIREN_UI_MESH_TARGET_MS` 环境变量可指定桌面启动目标（自动化验证用）。
+
+### 溢出修剪造成的"无声洞"（非欠载、非丢帧）
+
+3 分钟真实录制逐帧检查（`scripts/analyze_gaps.py`）发现：Linux 播放路径每 3–8 s 出现 15–195 ms 的**数字全零**，而 `underruns / lost_frames / plc_frames / overflow_packets / buffer_resets / clicks` 一格没动——即用户报告的"既不是欠载也不是丢帧"的中断。
+
+- 根因在 `dsp/resampler.rs` 的修剪分支：它把缓冲清零后**直接 return**，而 `Mixer::render` 事先把输出填 0，于是每一次修剪都变成一整块静音；接缝处再叠加 3 ms 渐入，听起来就是"吞一下"。
+- 现在修剪只丢弃最旧的未播放帧（内部缓冲优先，再从环形缓冲丢），保留读取游标并**继续渲染**，接缝由既有渐入覆盖；`fill_frames` 报告修剪之后的水位。
+- 新增指标 `master.silent_ms / silent_gaps`：混音输出为纯零的时长与次数，WebUI「组网」卡显示为"无声洞"。这是唯一能看见这类中断的计数。
+- 验证（同一探针：Playback + `parecord` 录 `play_sink.monitor` + 660 Hz 测试音 + 0.1 s 统计）：修复前 73 s 内 30 个事件、22 个无法归因；修复后 97 s 窗口内除入网前的初始静音外为 0。
+- 量测口径提醒：`siren mesh --record`（Record 模式）由睡眠循环驱动混音，Linux 上 `boost_thread_priority()` 是空实现，同一网络内容下 125 s 内饿死 10.6 s，而 Playback 模式 104 s 内只有 0.75 s——**听感基线必须用 Playback + 独立 monitor 采集**，`--record` 只适合看内容本身。
+- `SIREN_PULSE_LATENCY_MS` 可调 Pulse 服务端缓冲（默认 20 ms）；调到 60 ms 只能减少不能消除这类洞，真正的修复是不再输出静音块。
 
 ## 13. 构建与依赖
 
