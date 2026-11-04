@@ -134,7 +134,7 @@
   .krange { width: 108px; display: flex; justify-content: space-between; margin-top: 2px; font-size: 9.5px; color: var(--muted-2); }
   .klab { margin-top: 4px; font-size: 11px; font-weight: 700; letter-spacing: .16em; color: var(--muted); }
   .dright { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-  .level { padding: 8px 9px; display: flex; flex-direction: column; justify-content: space-between; height: 118px; }
+  .level { padding: 8px 9px; display: flex; flex-direction: column; justify-content: space-between; height: 98px; }
   .level .lk { font-size: 9.5px; letter-spacing: .08em; color: var(--muted-2); }
   .level .lv { font: 600 22px/1 var(--mono); color: var(--accent, var(--blue)); }
   .level .lv i { font-style: normal; font-size: 10px; color: var(--muted); margin-left: 3px; }
@@ -284,6 +284,7 @@
               <div class="fact">角色<b id="roleText">等待</b></div>
               <div class="fact">链路<b id="linkText">等待</b></div>
               <div class="fact">延迟<b id="rttText">—</b></div>
+              <div class="fact">无声洞<b id="silentText">—</b></div>
             </div>
             <button class="bigbtn" id="join">加入组网</button>
           </div>
@@ -388,6 +389,24 @@ function streamName(stream, snap) {
 
 function deviceStreams(snap) {
   return (snap?.center?.streams || []).filter((s) => Number(s.stream_id) !== MIX_STREAM_ID);
+}
+/* 心跳按节点量测，流按 origin 归属节点。 */
+function peerFor(stream, snap) {
+  if (!stream) return null;
+  for (const peer of snap?.peers || []) {
+    if (peer.uid && peer.uid === stream.origin) return peer;
+  }
+  return null;
+}
+function latencyLabel(stream, snap) {
+  const peer = peerFor(stream, snap);
+  const p50 = peer ? Number(peer.rtt_ms) : NaN;
+  if (!Number.isFinite(p50)) return "—";
+  const p99 = Number(peer.rtt_p99_ms);
+  const loss = Number(peer.loss_pct);
+  const span = Number.isFinite(p99) ? `${Math.round(p50)}/${Math.round(p99)}` : `${Math.round(p50)}`;
+  const tail = Number.isFinite(loss) && loss >= 0.05 ? ` ·${Math.round(loss)}%` : "";
+  return `${span} ms${tail}`;
 }
 /* 卡片要包含 0xFFF0 混音流：它是 N−1 转发的唯一观测点，调试缓冲时必须能看见。 */
 function slotStreams(snap) {
@@ -524,6 +543,7 @@ function slotMarkup(index, stream, snap) {
           <div class="fact">丢帧<b>${stream ? (Number(stream.lost_frames) || 0) : 0}</b></div>
           <div class="fact">欠载<b>${stream ? (Number(stream.underruns) || 0) : 0}</b></div>
           <div class="fact">咔哒<b>${stream ? (Number(stream.clicks) || 0) : 0}</b></div>
+          <div class="fact">延迟<b>${stream ? esc(latencyLabel(stream, snap)) : "—"}</b></div>
         </div>
       </div>
     </div>`;
@@ -555,11 +575,13 @@ function renderSlots(snap) {
         buf.className = bufClass(stream);
       }
       const facts = slot.querySelectorAll(".fact b");
-      if (facts.length === 4) {
+      if (facts.length === 5) {
         facts[0].textContent = stream ? pathLabel(stream.path) : "—";
         facts[1].textContent = stream ? (Number(stream.lost_frames) || 0) : 0;
         facts[2].textContent = stream ? (Number(stream.underruns) || 0) : 0;
         facts[3].textContent = stream ? (Number(stream.clicks) || 0) : 0;
+        const latency = latencyLabel(stream, snap);
+        if (facts[4].textContent !== latency) facts[4].textContent = latency;
       }
       const name = $(".cname", slot);
       if (name && stream) { const text = streamName(stream, snap); if (name.textContent !== text) name.textContent = text; }
@@ -715,6 +737,12 @@ function render() {
   $("#rttText").textContent = rtts.length
     ? `${Math.min(...rtts).toFixed(0)}–${Math.max(...rtts).toFixed(0)} ms`
     : "—";
+  const silent = snap.center?.master || {};
+  const gaps = Number(silent.silent_gaps) || 0;
+  const silentMs = Number(silent.silent_ms) || 0;
+  $("#silentText").textContent = gaps
+    ? `${gaps} 次 / ${silentMs >= 1000 ? (silentMs / 1000).toFixed(1) + " s" : silentMs + " ms"}`
+    : "0 次";
   const join = $("#join");
   join.textContent = s.starting ? "加入中…" : (s.running ? "离开组网" : "加入组网");
   join.classList.toggle("leave", Boolean(s.running));

@@ -60,7 +60,16 @@ fn open_stream(device: Option<&str>) -> Result<Simple> {
     };
     // 20 ms keeps the sink from underrunning on a busy NAS; the fill still
     // only oscillates by one 2.5 ms block, inside the canceller's window.
-    let target = 20 * SAMPLE_RATE / 1000 * BYTES_PER_FRAME as u32;
+    // SIREN_PULSE_LATENCY_MS raises the server-side buffer when this thread's
+    // scheduling gap is longer than the buffer: then a stall costs latency
+    // instead of leaving audible silence in the device output.
+    let latency_ms: u32 = std::env::var("SIREN_PULSE_LATENCY_MS")
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(20)
+        .clamp(5, 200);
+    log::info!("pulse playback buffer {latency_ms} ms");
+    let target = latency_ms * SAMPLE_RATE / 1000 * BYTES_PER_FRAME as u32;
     let attr = BufferAttr {
         maxlength: target * 2,
         tlength: target,

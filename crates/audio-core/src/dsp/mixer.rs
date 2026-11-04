@@ -202,6 +202,9 @@ pub struct Mixer {
     /// otherwise a target chosen before any peer connected silently reverts
     /// to the startup value and network jitter becomes underruns.
     target_override: Option<f32>,
+    /// Whether the previous rendered block came out as exact digital zero; the
+    /// true→false edge is one interruption, however many blocks it lasts.
+    silent_last: bool,
     metrics: Arc<MixerMetrics>,
 }
 
@@ -221,6 +224,7 @@ pub fn new_mixer(max_streams: usize) -> (Mixer, MixerHandle) {
         master_gain: 1.0,
         limiter: Limiter::new(),
         target_override: None,
+        silent_last: false,
         metrics: metrics.clone(),
     };
     (mixer, MixerHandle { tx, metrics })
@@ -386,6 +390,20 @@ impl Mixer {
             sumsq += (*sample as f64) * (*sample as f64);
         }
 
+        let frames = (out.len() / CHANNELS) as u64;
+        if peak == 0.0 {
+            self.metrics.silent_frames.fetch_add(frames, Ordering::Relaxed);
+            if !self.silent_last {
+                self.metrics
+                    .silent_gaps
+                    .fetch_add(1, Ordering::Relaxed);
+                log::debug!(
+                    "mixer: digital silence starts with {active} stream(s) attached"
+                );
+            }
+        }
+        self.silent_last = peak == 0.0;
+
         let samples = out.len().max(1) as f64;
         store_f32(&self.metrics.rms, (sumsq / samples).sqrt() as f32);
         store_f32(&self.metrics.peak, peak);
@@ -394,7 +412,7 @@ impl Mixer {
             .fetch_max(peak.to_bits(), Ordering::Relaxed);
         self.metrics
             .frames_rendered
-            .fetch_add((out.len() / CHANNELS) as u64, Ordering::Relaxed);
+            .fetch_add(frames, Ordering::Relaxed);
         self.metrics
             .clipped_samples
             .fetch_add(clipped, Ordering::Relaxed);
@@ -459,6 +477,58 @@ mod tests {
             "late stream kept the startup target: {}",
             load_f32(&metrics.target_ms)
         );
+    }
+
+    #[test]
+    fn counts_digital_silence_runs_that_no_other_metric_sees() {
+        // 挂上流但环里没数据：输出是纯零。这正是实录里"既不记欠载也不记丢帧"
+        // 的中断，必须有一个指标能数到它。
+        let (mut mixer, mut handle) = new_mixer(4);
+        let (_producer, consumer) = rtrb::RingBuffer::new(SAMPLE_RATE as usize * CHANNELS);
+        let metrics = Arc::new(StreamMetrics::new(
+            7,
+            0,
+            0,
+            "starved".into(),
+            "127.0.0.1:1".into(),
+            Codec::RawF32,
+            30.0,
+        ));
+        assert!(handle.add(StreamChannel::new(metrics.clone(), consumer, 30.0)));
+
+        let mut out = vec![0.0f32; frames_for_ms(50.0) * CHANNELS];
+        for _ in 0..10 {
+            mixer.render(&mut out);
+        }
+        let master = mixer.metrics.snapshot();
+        assert_eq!(master.silent_gaps, 1, "one continuous run of silence");
+        assert_eq!(master.silent_ms, 500, "ten 50 ms blocks of zeros");
+
+        // 持续供音频之后，静音计数必须停下来：修剪不再产生数字静音。
+        let (mut p2, c2) = rtrb::RingBuffer::new(SAMPLE_RATE as usize * CHANNELS);
+        let live = Arc::new(StreamMetrics::new(
+            8,
+            0,
+            0,
+            "live".into(),
+            "127.0.0.1:1".into(),
+            Codec::RawF32,
+            30.0,
+        ));
+        assert!(handle.add(StreamChannel::new(live.clone(), c2, 30.0)));
+        let mut tone = Tone::new(440.0);
+        for _ in 0..10 {
+            let mut block = vec![0.0f32; frames_for_ms(50.0) * CHANNELS];
+            tone.fill(&mut block);
+            let _ = p2.push_partial_slice(&block);
+            mixer.render(&mut out);
+        }
+        let after = mixer.metrics.snapshot();
+        assert_eq!(
+            after.silent_gaps, 1,
+            "a fed stream must not fall back into digital silence"
+        );
+        assert_eq!(after.silent_ms, 500, "silent time stopped growing");
     }
 
     #[test]

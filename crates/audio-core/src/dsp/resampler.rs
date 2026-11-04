@@ -130,15 +130,31 @@ impl DriftResampler {
 
         let available = self.len_frames + rx.slots() / CHANNELS;
         let reset_threshold = fill_ceiling_frames(self.target_frames);
+        let mut trimmed = false;
         if self.started && available as f64 > reset_threshold {
             // Drop the oldest audio down to the target. This only happens
             // after a long stall; the alternative is minutes of added latency.
-            let local = self.len_frames;
-            self.len_frames = 0;
-            self.pos = 1.0;
-            let mut to_drop = available
-                .saturating_sub(self.target_frames as usize)
-                .saturating_sub(local);
+            //
+            // The trim must keep rendering: the old path returned here, and
+            // because the mixer zeroes the output buffer first, every trim
+            // cost a whole block of digital silence — measured as 15–195 ms
+            // holes that no underrun, loss or overflow counter reported.
+            let target = self.target_frames as usize;
+            let excess = available.saturating_sub(target);
+            let head = self.pos.floor() as usize;
+            let frac = self.pos - head as f64;
+            let unplayed = self.len_frames.saturating_sub(head + 1);
+            let drop_local = excess.min(unplayed);
+            if drop_local > 0 {
+                let from = (head + 1 + drop_local) * CHANNELS;
+                let to = self.len_frames * CHANNELS;
+                if from < to {
+                    self.buf.copy_within(from..to, (head + 1) * CHANNELS);
+                }
+                self.len_frames -= drop_local;
+                self.pos = head as f64 + 1.0 + frac;
+            }
+            let mut to_drop = excess - drop_local;
             while to_drop > 0 {
                 let want = to_drop.min(1024) * CHANNELS;
                 let got = {
@@ -150,21 +166,19 @@ impl DriftResampler {
                 }
                 to_drop -= got;
             }
-            // MIX1 (#64): the old path set started=false, which re-warmed the
-            // stream (silence until the water level refilled) and fed the
-            // trim<->underrun oscillation. Stay started: the buffer is at
-            // target, the PI state is reset, and the resume is faded in.
+            // MIX1 (#64): stay started with the PI state reset and fade the
+            // seam in, so the trim neither re-warms nor clicks.
             self.integral = 0.0;
             self.fill_ema = self.target_frames;
             self.ramp_left = crate::format::RAMP_FRAMES;
-            return RenderReport {
-                fill_frames: (self.len_frames + rx.slots() / CHANNELS) as u32,
-                ratio: 1.0,
-                started: true,
-                buffer_reset: true,
-                ..Default::default()
-            };
+            trimmed = true;
         }
+        // 修剪块要报告修剪之后的水位，否则 UI 会显示一个再也不会出现的缓冲深度。
+        let fill_report = if trimmed {
+            (self.len_frames + rx.slots() / CHANNELS) as u32
+        } else {
+            available as u32
+        };
         if !self.started {
             if available as f64 >= self.target_frames * START_FRACTION && available >= 4 {
                 self.started = true;
@@ -208,6 +222,7 @@ impl DriftResampler {
                 underran: true,
                 missing_frames: out_frames as u32,
                 started: false,
+                buffer_reset: trimmed,
                 ..Default::default()
             };
         }
@@ -273,12 +288,12 @@ impl DriftResampler {
             // Report the buffer health seen at the start of this block, before
             // the device callback consumed its share. This is the number the
             // `--target-ms` setting refers to.
-            fill_frames: available as u32,
+            fill_frames: fill_report,
             ratio: self.ratio as f32,
             underran: missing_frames > 0,
             missing_frames,
             started: self.started,
-            buffer_reset: false,
+            buffer_reset: trimmed,
         }
     }
 
@@ -453,6 +468,9 @@ mod tests {
             "fill after reset {} frames",
             report.fill_frames
         );
+        // 修剪块本身必须继续出声：以前它直接返回，out 保持混音器填的 0，
+        // 于是每次修剪都是一整块数字静音（实测 15–195 ms 的洞）。
+        assert!(report.peak > 0.05, "the trimmed block must still carry audio");
 
         // The very next block renders audio again (faded in), no warm-up gap.
         let report = resampler.render(&mut consumer, 240, 1.0, &mut out);

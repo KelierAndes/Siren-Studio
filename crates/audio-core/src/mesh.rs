@@ -75,6 +75,9 @@ pub struct MeshConfig {
     /// Stable node identity. `None` falls back to `SIREN_NODE_ID`, then to the
     /// id persisted for this machine, then to a fresh random id.
     pub node_id: Option<String>,
+    /// Write the mixed output to a WAV file instead of playing it. Used to
+    /// inspect a real 3-minute session frame by frame.
+    pub record: Option<String>,
 }
 
 impl Default for MeshConfig {
@@ -100,6 +103,7 @@ impl Default for MeshConfig {
             bt: None,
             bt_channel: None,
             node_id: None,
+            record: None,
             bt_exempt_ports: Vec::new(),
         }
     }
@@ -431,13 +435,15 @@ impl MeshEngine {
             port: config.port,
             target_ms: config.target_ms,
             max_streams: config.max_streams,
-            mode: if config.output {
+            mode: if config.record.is_some() {
+                CenterMode::Record
+            } else if config.output {
                 CenterMode::Playback
             } else {
                 CenterMode::Silent
             },
             device: config.output_device.clone(),
-            record_path: None,
+            record_path: config.record.clone(),
             advertise: config.advertise,
             name: config.name.clone(),
             role: "mesh".into(),
@@ -584,6 +590,16 @@ impl MeshEngine {
             crate::engine::stop_trace("mesh");
         }
         self.center.stop();
+    }
+
+    /// Stop and block until the sender thread has exited. A headless run that
+    /// returns before this leaves the recorder mid-file: the WAV header would
+    /// keep its placeholder sizes and the recording is unreadable.
+    pub fn wait_until_stopped(&self) {
+        self.stop();
+        if let Some(join) = self.join.lock().unwrap().take() {
+            let _ = join.join();
+        }
     }
 }
 

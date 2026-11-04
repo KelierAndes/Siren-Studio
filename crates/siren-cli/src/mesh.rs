@@ -61,6 +61,9 @@ pub struct MeshArgs {
     /// Append snapshot JSON lines to this file.
     #[arg(long)]
     pub stats_json: Option<String>,
+    /// Record the mixed audio to this WAV file instead of playing it locally.
+    #[arg(long)]
+    pub record: Option<String>,
     #[arg(long, default_value_t = 1.0)]
     pub stats_interval: f64,
 }
@@ -142,16 +145,21 @@ pub fn run(args: MeshArgs) -> Result<()> {
         amplitude: args.amplitude,
         discovery_secs: args.discovery_secs.max(1),
         static_peers: args.peers.clone(),
+        record: args.record.clone(),
         ..MeshConfig::default()
     };
 
     println!(
-        "siren mesh \"{name}\" on {}:{} — source {:?}, output {}, buffer {:.0} ms",
+        "siren mesh \"{name}\" on {}:{} — source {:?}, output {}, buffer {:.0} ms{}",
         args.bind,
         args.port,
         source,
         if args.no_play { "off" } else { "on" },
-        args.target_ms
+        args.target_ms,
+        args.record
+            .as_ref()
+            .map(|path| format!(", recording to {path}"))
+            .unwrap_or_default()
     );
     let engine = MeshEngine::start(config).context("start mesh node")?;
     let stop = util::stop_flag();
@@ -207,7 +215,7 @@ pub fn run(args: MeshArgs) -> Result<()> {
     }
 
     let snapshot = engine.snapshot();
-    engine.stop();
+    engine.wait_until_stopped();
     let summary = Summary {
         event: "summary",
         name: &snapshot.name,

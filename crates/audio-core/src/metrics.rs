@@ -284,6 +284,11 @@ pub struct MixerMetrics {
     pub frames_rendered: AtomicU64,
     pub clipped_samples: AtomicU64,
     pub active_streams: AtomicU32,
+    /// Output blocks that came out as exact digital zero, and how many runs of
+    /// them there were. A zero run is a real interruption: attenuation, limiting
+    /// and underrun-fill all leave *some* energy, silence does not.
+    pub silent_frames: AtomicU64,
+    pub silent_gaps: AtomicU64,
 }
 
 impl MixerMetrics {
@@ -295,6 +300,8 @@ impl MixerMetrics {
             frames_rendered: AtomicU64::new(0),
             clipped_samples: AtomicU64::new(0),
             active_streams: AtomicU32::new(0),
+            silent_frames: AtomicU64::new(0),
+            silent_gaps: AtomicU64::new(0),
         }
     }
 
@@ -306,6 +313,8 @@ impl MixerMetrics {
             frames_rendered: self.frames_rendered.load(Ordering::Relaxed),
             clipped_samples: self.clipped_samples.load(Ordering::Relaxed),
             active_streams: self.active_streams.load(Ordering::Relaxed),
+            silent_ms: self.silent_frames.load(Ordering::Relaxed) * 1000 / crate::format::SAMPLE_RATE as u64,
+            silent_gaps: self.silent_gaps.load(Ordering::Relaxed),
         }
     }
 }
@@ -324,6 +333,9 @@ pub struct MasterSnapshot {
     pub frames_rendered: u64,
     pub clipped_samples: u64,
     pub active_streams: u32,
+    /// 输出为数字全零的总时长与次数：这些中断不体现在欠载/丢帧里。
+    pub silent_ms: u64,
+    pub silent_gaps: u64,
 }
 
 /// Shared list of active streams, used by status consumers.
