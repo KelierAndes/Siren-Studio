@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-labelledby="t2 d2">
+  <title id="t2">Siren audio pipeline</title>
+  <desc id="d2">Five-stage pipeline: capture (loopback, mic, tone), 5 ms frames encoded as Raw f32 or Opus, dual-stack transport over Wi-Fi UDP and Bluetooth RFCOMM with deduplication, per-stream jitter buffer with PI drift correction, then linear mix with tanh limiting to playback or WAV recording.</desc>
+
+  <defs>
+    <pattern id="grid2" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0v48" fill="none" stroke="#16213E" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="300" rx="26" fill="#0B1020"/>
+  <rect width="1200" height="300" rx="26" fill="url(#grid2)" opacity="0.55"/>
+
+  <text x="64" y="48" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="20" letter-spacing="3" fill="#4EF7C8">PIPELINE &#183; &#20449;&#21495;&#36890;&#36335;</text>
+
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif">
+    <g transform="translate(64 84)">
+      <rect width="196" height="108" rx="14" fill="#070C1C" stroke="#223258" stroke-width="1.5"/>
+      <text x="98" y="44" text-anchor="middle" font-size="24" font-weight="600" fill="#E8ECF8">&#37319;&#38598;</text>
+      <text x="98" y="76" text-anchor="middle" font-size="18" fill="#9FB0D8">loopback &#183; mic &#183; tone</text>
+    </g>
+    <g transform="translate(292 84)">
+      <rect width="196" height="108" rx="14" fill="#070C1C" stroke="#223258" stroke-width="1.5"/>
+      <text x="98" y="44" text-anchor="middle" font-size="24" font-weight="600" fill="#E8ECF8">&#32534;&#30721;</text>
+      <text x="98" y="76" text-anchor="middle" font-size="18" fill="#9FB0D8">5 ms &#183; Raw / Opus</text>
+    </g>
+    <g transform="translate(520 84)">
+      <rect width="196" height="108" rx="14" fill="#070C1C" stroke="#4EF7C8" stroke-width="2"/>
+      <text x="98" y="44" text-anchor="middle" font-size="24" font-weight="600" fill="#E8ECF8">&#21452;&#26632;&#20256;&#36755;</text>
+      <text x="98" y="76" text-anchor="middle" font-size="18" fill="#9FB0D8">Wi-Fi UDP + BT</text>
+    </g>
+    <g transform="translate(748 84)">
+      <rect width="196" height="108" rx="14" fill="#070C1C" stroke="#223258" stroke-width="1.5"/>
+      <text x="98" y="44" text-anchor="middle" font-size="24" font-weight="600" fill="#E8ECF8">&#32531;&#20914;&#26657;&#27491;</text>
+      <text x="98" y="76" text-anchor="middle" font-size="18" fill="#9FB0D8">jitter + PI drift</text>
+    </g>
+    <g transform="translate(976 84)">
+      <rect width="160" height="108" rx="14" fill="#070C1C" stroke="#8B7BE8" stroke-width="2"/>
+      <text x="80" y="44" text-anchor="middle" font-size="24" font-weight="600" fill="#E8ECF8">&#28151;&#38899;&#36755;&#20986;</text>
+      <text x="80" y="76" text-anchor="middle" font-size="18" fill="#9FB0D8">mix &#8594; play / WAV</text>
+    </g>
+  </g>
+
+  <g fill="none" stroke="#4EF7C8" stroke-width="2.5" stroke-dasharray="10 12">
+    <path d="M260 138 H292"><animate attributeName="stroke-dashoffset" from="0" to="-44" dur="1s" repeatCount="indefinite"/></path>
+    <path d="M488 138 H520"><animate attributeName="stroke-dashoffset" from="0" to="-44" dur="1s" repeatCount="indefinite"/></path>
+    <path d="M716 138 H748"><animate attributeName="stroke-dashoffset" from="0" to="-44" dur="1s" repeatCount="indefinite"/></path>
+    <path d="M944 138 H976"><animate attributeName="stroke-dashoffset" from="0" to="-44" dur="1s" repeatCount="indefinite"/></path>
+  </g>
+
+  <text x="618" y="230" text-anchor="middle" font-family="'PingFang SC','Microsoft YaHei',sans-serif" font-size="18" fill="#5B6C93">&#27599;&#19968;&#24103;&#21516;&#26102;&#20889;&#20837;&#20004;&#26465;&#38142;&#36335;&#65292;&#25509;&#25910;&#31471;&#25353; (&#26469;&#28304;, &#27969;, &#24207;&#21495;) &#21435;&#37325;</text>
+</svg>

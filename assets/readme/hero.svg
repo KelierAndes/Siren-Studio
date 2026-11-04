@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="t d">
+  <title id="t">Siren Studio</title>
+  <desc id="d">Hero banner: name and bilingual tagline on the left; on the right a mesh of three devices — PC, phone, Linux server — exchanging audio packets in both directions with a central mixer whose channel bars animate.</desc>
+
+  <defs>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0v48" fill="none" stroke="#16213E" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="360" rx="26" fill="#0B1020"/>
+  <rect width="1200" height="360" rx="26" fill="url(#grid)" opacity="0.55"/>
+
+  <!-- title block -->
+  <g transform="translate(64 52)">
+    <text font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="20" letter-spacing="3" fill="#4EF7C8">WI-FI + BLUETOOTH &#183; NO CENTER REQUIRED</text>
+    <text y="76" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="64" font-weight="700" fill="#E8ECF8">Siren Studio</text>
+
+    <path d="M2 104 q16 -22 32 0 t32 0 t32 0 t32 0" fill="none" stroke="#4EF7C8" stroke-width="2.5" stroke-linecap="round" opacity="0.85"/>
+
+    <text y="152" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="24" fill="#C3CEE8">Every device is a sender and a mixer,</text>
+    <text y="184" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="24" fill="#C3CEE8">auto-discovered over the LAN.</text>
+    <text y="218" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#8FA0C8">&#23616;&#22495;&#32593;&#22810;&#35774;&#22791;&#22768;&#38899;&#23454;&#26102;&#20114;&#32852;&#65292;&#27599;&#21488;&#35774;&#22791;&#26082;&#26159;&#21457;&#36865;&#31471;&#20063;&#26159;&#28151;&#38899;&#31471;</text>
+
+    <g transform="translate(0 240)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#9FB0D8">
+      <rect width="78" height="34" rx="8" fill="none" stroke="#2A3A60"/><text x="16" y="23">Rust</text>
+      <g transform="translate(92 0)"><rect width="150" height="34" rx="8" fill="none" stroke="#2A3A60"/><text x="16" y="23">Dart &#183; Flutter</text></g>
+      <g transform="translate(256 0)"><rect width="88" height="34" rx="8" fill="none" stroke="#2A3A60"/><text x="16" y="23">UDP</text></g>
+      <g transform="translate(358 0)"><rect width="80" height="34" rx="8" fill="none" stroke="#2A3A60"/><text x="16" y="23">BLE</text></g>
+    </g>
+  </g>
+
+  <!-- mesh panel -->
+  <g transform="translate(676 40)">
+    <rect width="460" height="280" rx="18" fill="#070C1C" stroke="#223258" stroke-width="1.5"/>
+
+    <!-- links -->
+    <g stroke="#2A3A60" stroke-width="2">
+      <line x1="120" y1="72" x2="340" y2="72"/>
+      <line x1="120" y1="72" x2="230" y2="176"/>
+      <line x1="340" y1="72" x2="230" y2="176"/>
+    </g>
+
+    <!-- packets on links -->
+    <circle r="4" cx="120" cy="72" fill="#4EF7C8"><animateMotion path="M0 0 L220 0" dur="1.6s" repeatCount="indefinite"/></circle>
+    <circle r="4" cx="340" cy="72" fill="#8B7BE8"><animateMotion path="M0 0 L-220 0" dur="1.9s" begin="0.4s" repeatCount="indefinite"/></circle>
+    <circle r="4" cx="120" cy="72" fill="#4EF7C8"><animateMotion path="M0 0 L110 104" dur="1.8s" begin="0.8s" repeatCount="indefinite"/></circle>
+    <circle r="4" cx="230" cy="176" fill="#8B7BE8"><animateMotion path="M0 0 L110 -104" dur="1.5s" repeatCount="indefinite"/></circle>
+
+    <!-- PC node -->
+    <g transform="translate(84 44)">
+      <rect width="72" height="46" rx="8" fill="none" stroke="#4EF7C8" stroke-width="2"/>
+      <line x1="60" y1="52" x2="84" y2="52" stroke="#4EF7C8" stroke-width="2"/>
+      <text y="72" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#9FB0D8">Windows</text>
+    </g>
+
+    <!-- phone node -->
+    <g transform="translate(306 40)">
+      <rect x="10" width="42" height="58" rx="8" fill="none" stroke="#8B7BE8" stroke-width="2"/>
+      <line x1="24" y1="50" x2="38" y2="50" stroke="#8B7BE8" stroke-width="2"/>
+      <text x="31" y="76" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#9FB0D8">Android</text>
+    </g>
+
+    <!-- linux node (mixer) -->
+    <g transform="translate(184 150)">
+      <rect width="92" height="60" rx="10" fill="none" stroke="#4EF7C8" stroke-width="2"/>
+      <g fill="#4EF7C8">
+        <rect x="14" y="34" width="10" height="14" rx="2">
+          <animate attributeName="height" values="14;30;8;22;14" dur="1.8s" repeatCount="indefinite"/>
+          <animate attributeName="y" values="34;18;40;26;34" dur="1.8s" repeatCount="indefinite"/>
+        </rect>
+        <rect x="30" y="22" width="10" height="26" rx="2">
+          <animate attributeName="height" values="26;10;32;16;26" dur="1.5s" repeatCount="indefinite"/>
+          <animate attributeName="y" values="22;38;16;32;22" dur="1.5s" repeatCount="indefinite"/>
+        </rect>
+        <rect x="46" y="30" width="10" height="18" rx="2">
+          <animate attributeName="height" values="18;34;10;28;18" dur="2.2s" repeatCount="indefinite"/>
+          <animate attributeName="y" values="30;14;38;20;30" dur="2.2s" repeatCount="indefinite"/>
+        </rect>
+        <rect x="62" y="18" width="10" height="30" rx="2">
+          <animate attributeName="height" values="30;12;26;10;30" dur="1.9s" repeatCount="indefinite"/>
+          <animate attributeName="y" values="18;36;22;38;18" dur="1.9s" repeatCount="indefinite"/>
+        </rect>
+      </g>
+      <text x="46" y="84" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#9FB0D8">Linux</text>
+    </g>
+
+    <text x="230" y="256" text-anchor="middle" font-family="'PingFang SC','Microsoft YaHei',sans-serif" font-size="18" fill="#5B6C93">&#27599;&#21488;&#37117;&#26159;&#28151;&#38899;&#31471;</text>
+  </g>
+</svg>
