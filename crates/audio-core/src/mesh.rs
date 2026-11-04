@@ -832,31 +832,7 @@ fn run_mesh_sender(
         }
 
         let health = shared.health.lock().unwrap().clone();
-        let peer_snapshot: Vec<MeshPeer> = current
-            .iter()
-            .filter(|(_, peer)| peer.pinned || peer.last_seen.elapsed() < PEER_UI_FRESHNESS)
-            .map(|(_, peer)| {
-                let entry = health.get(&peer.addr.to_string());
-                let rtt_ms = entry
-                    .filter(|h| h.samples > 0)
-                    .map(|h| h.rtt_p50_us as f64 / 1000.0);
-                let rtt_p99_ms = entry
-                    .filter(|h| h.samples > 0)
-                    .map(|h| h.rtt_p99_us as f64 / 1000.0);
-                let loss_pct = entry.filter(|h| h.samples > 0).map(|h| h.loss_pct);
-                MeshPeer {
-                    name: peer.name.clone(),
-                    id: peer.id.clone(),
-                    uid: node_uid(&peer.id),
-                    endpoint: peer.addr.to_string(),
-                    bit: peer.bit,
-                    bt: peer.bt.clone(),
-                    rtt_ms,
-                    rtt_p99_ms,
-                    loss_pct,
-                }
-            })
-            .collect();
+        let peer_snapshot = build_peer_snapshot(&current, &health);
         *shared.peers.lock().unwrap() = peer_snapshot;
 
         // Encode once per tick per carrier: Wi-Fi peers share the primary
@@ -1144,6 +1120,35 @@ fn peer_key(peer: &discovery::DiscoveredPeer) -> String {
     }
 }
 
+/// Online nodes for the UI snapshot, with their heartbeat path health.
+///
+/// The `peers` map, `senders` and the heartbeat `health` map all key on
+/// `peer_key`, so the lookup has to use that key too; the socket address is a
+/// different string and looking it up silently reports null RTT for every peer.
+fn build_peer_snapshot(
+    current: &HashMap<String, SendPeer>,
+    health: &HashMap<String, crate::net::udp::PathHealth>,
+) -> Vec<MeshPeer> {
+    current
+        .iter()
+        .filter(|(_, peer)| peer.pinned || peer.last_seen.elapsed() < PEER_UI_FRESHNESS)
+        .map(|(key, peer)| {
+            let measured = health.get(key.as_str()).filter(|h| h.samples > 0);
+            MeshPeer {
+                name: peer.name.clone(),
+                id: peer.id.clone(),
+                uid: node_uid(&peer.id),
+                endpoint: peer.addr.to_string(),
+                bit: peer.bit,
+                bt: peer.bt.clone(),
+                rtt_ms: measured.map(|h| h.rtt_p50_us as f64 / 1000.0),
+                rtt_p99_ms: measured.map(|h| h.rtt_p99_us as f64 / 1000.0),
+                loss_pct: measured.map(|h| h.loss_pct),
+            }
+        })
+        .collect()
+}
+
 fn resolve_ipv4(endpoint: &str) -> Result<SocketAddr> {
     use std::net::ToSocketAddrs;
     endpoint
@@ -1206,6 +1211,50 @@ pub fn parse_pinned_peer(spec: &str) -> Result<PinnedPeer> {
 mod tests {
     use super::*;
     use std::thread;
+
+    #[test]
+    fn snapshot_reports_heartbeat_health_under_the_same_key_as_the_sender_list() {
+        // The peers map is keyed by node id, not by "ip:port". A snapshot that
+        // looked health up by address reported null RTT for every peer while the
+        // heartbeats themselves were answering fine.
+        let addr: SocketAddr = "192.168.2.124:47900".parse().unwrap();
+        let peers = HashMap::from([(
+            "72a176cebfe88db4".to_string(),
+            SendPeer {
+                name: "Phone".into(),
+                id: "72a176cebfe88db4".into(),
+                addr,
+                bit: None,
+                bt: None,
+                pinned: true,
+                last_seen: Instant::now(),
+            },
+        )]);
+        let health = HashMap::from([(
+            "72a176cebfe88db4".to_string(),
+            crate::net::udp::PathHealth {
+                rtt_p50_us: 8_000,
+                rtt_p99_us: 21_000,
+                loss_pct: 2.5,
+                samples: 40,
+            },
+        )]);
+
+        let snapshot = build_peer_snapshot(&peers, &health);
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].endpoint, addr.to_string());
+        assert_eq!(snapshot[0].rtt_ms, Some(8.0));
+        assert_eq!(snapshot[0].rtt_p99_ms, Some(21.0));
+        assert_eq!(snapshot[0].loss_pct, Some(2.5));
+
+        // No samples yet means "unknown", not "0 ms".
+        let silent = HashMap::from([(
+            "72a176cebfe88db4".to_string(),
+            crate::net::udp::PathHealth::default(),
+        )]);
+        let snapshot = build_peer_snapshot(&peers, &silent);
+        assert_eq!(snapshot[0].rtt_ms, None);
+    }
 
     #[test]
     fn mesh_nodes_exchange_audio_without_manual_discovery() {

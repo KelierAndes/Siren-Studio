@@ -1171,7 +1171,7 @@ mod tunnel_tests {
     use super::*;
     use crate::protocol::{Codec, FrameHeader};
     use std::net::UdpSocket;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     #[test]
     fn compact_envelope_carries_a_decodable_frame() {
