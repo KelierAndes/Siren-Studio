@@ -72,6 +72,7 @@ class StreamState {
     required this.label,
     required this.addr,
     required this.path,
+    required this.mixCount,
     required this.codec,
     required this.active,
     required this.gainDb,
@@ -101,7 +102,10 @@ class StreamState {
   final int streamId;
   final String label;
   final String addr;
+  /// Carrier that delivered the newest frame *here*; empty until a packet lands.
   final String path;
+  /// For a 0xFFF0 relay mix: how many nodes it folds in; 0 for device streams.
+  final int mixCount;
   final String codec;
   final bool active;
   final double gainDb;
@@ -131,7 +135,8 @@ class StreamState {
         streamId: _i(json['stream_id']),
         label: _s(json['label'], 'stream'),
         addr: _s(json['addr']),
-        path: _s(json['path'], 'wifi'),
+        path: _s(json['path']),
+        mixCount: _i(json['mix_count']),
         codec: _s(json['codec'], 'raw'),
         active: _b(json['active']),
         gainDb: _d(json['gain_db']),
@@ -288,6 +293,8 @@ class MeshPeerState {
   /// Sender uid as 16-char hex; matches StreamState.origin.
   final String uid;
   final String endpoint;
+  /// The peer's RFCOMM address. It says the Bluetooth path is *known*, not
+  /// which carrier is currently delivering audio — both stacks send in parallel.
   final String? bt;
   /// Heartbeat path health to this node; null until the window has samples.
   final double? rttMs;
@@ -422,13 +429,14 @@ class MeshState {
   /// Human name for a stream: match its sender uid against known peers.
   String streamName(StreamState stream) {
     final mix = stream.streamId == 0xFFF0;
+    final label = mix && stream.mixCount > 0 ? '混音 · 含 ${stream.mixCount} 路' : '混音';
     for (final peer in [...peers, ...topology]) {
       if (peer.uid.isNotEmpty && peer.uid == stream.origin) {
         final name = peer.displayName;
-        return mix ? '$name · 混音' : name;
+        return mix ? '$name · $label' : name;
       }
     }
-    return mix ? '混音流' : stream.label;
+    return mix ? label : stream.label;
   }
 
   factory MeshState.fromJson(Map<String, dynamic> json) => MeshState(

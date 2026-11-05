@@ -1,0 +1,48 @@
+{
+  "pc": {
+    "switches": 0,
+    "switch_dirs": {},
+    "gap_count": 0,
+    "gap_max_ms": 0,
+    "gap_sum_ms": 0,
+    "trims": 1,
+    "trim_max_dropped_ms": 60.0,
+    "zeroruns_mix_over100ms": 0,
+    "carrier_seen": [
+      "bt",
+      "wifi"
+    ],
+    "buffer_last_ms": [
+      230,
+      152
+    ],
+    "underruns_last": 3,
+    "lost_frames_last": 0,
+    "bt_lines": 22,
+    "bt_link_end": 0,
+    "bt_link_peak": 0,
+    "hybrid": []
+  },
+  "phone": {
+    "switches": 0,
+    "switch_dirs": {},
+    "gap_count": 0,
+    "gap_max_ms": 0,
+    "gap_sum_ms": 0,
+    "trims": 0,
+    "trim_max_dropped_ms": 0,
+    "zeroruns_mix_over100ms": 0,
+    "carrier_seen": [
+      "wifi"
+    ],
+    "buffer_last_ms": [
+      80
+    ],
+    "underruns_last": 1,
+    "lost_frames_last": 0,
+    "bt_lines": 18,
+    "bt_link_end": 0,
+    "bt_link_peak": 0,
+    "hybrid": []
+  }
+}

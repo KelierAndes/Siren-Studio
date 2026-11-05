@@ -744,10 +744,12 @@ class _StreamCardState extends State<StreamCard> {
                     ),
                     const SizedBox(width: 8),
                     StatusPill(
+                      // 本机这一路的入向载波；对端的出向可能不同，未收到包就不猜。
                       label: switch (stream.path) {
-                        'bt' => '蓝牙',
-                        'local' => '本地',
-                        _ => 'Wi-Fi',
+                        'bt' => '入向 蓝牙',
+                        'local' => '入向 本地',
+                        'wifi' => '入向 Wi-Fi',
+                        _ => '入向 未知',
                       },
                       color: stream.path == 'bt'
                           ? AppColors.accent2

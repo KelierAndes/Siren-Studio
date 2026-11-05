@@ -25,6 +25,8 @@ pub struct Isolation {
     /// Set only when this process created the loopback / sink.
     loopback_module: Option<String>,
     sink_module: Option<String>,
+    /// Set when the requested playback sink had to be re-created.
+    playback_module: Option<String>,
     lock_path: PathBuf,
 }
 
@@ -45,6 +47,9 @@ impl Drop for Isolation {
         }
         let _ = pactl(&["set-default-sink", &self.playback_sink]);
         if let Some(module) = &self.sink_module {
+            let _ = pactl(&["unload-module", module]);
+        }
+        if let Some(module) = &self.playback_module {
             let _ = pactl(&["unload-module", module]);
         }
         let _ = std::fs::remove_file(&self.lock_path);
@@ -84,6 +89,7 @@ pub fn setup(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+    let requested_playback_sink = playback_sink.map(str::to_string);
     let playback_sink = playback_sink
         .map(str::to_string)
         .or_else(|| default_sink.clone())
@@ -100,6 +106,7 @@ pub fn setup(
     acquire_lock(&lock_path)?;
 
     let mut sink_module = None;
+    let mut playback_module = None;
     let mut loopback_module = None;
     let result = (|| -> Result<Isolation> {
         let sinks = pactl(&["list", "short", "sinks"])?;
@@ -116,6 +123,32 @@ pub fn setup(
                 "sink_properties=device.description=SirenCapture",
             ])?;
             sink_module = Some(id.trim().to_string());
+        }
+
+        // A --output-sink that no longer exists must never fall back to the
+        // default: isolation is about to make the *captured* sink the default,
+        // so the node would play its own mix into the sink it records. Volatile
+        // null sinks die with every PipeWire restart, and that self-echo is what
+        // the Linux node kept re-showing. Re-create it instead.
+        if requested_playback_sink.is_some() {
+            let current = pactl(&["list", "short", "sinks"])?;
+            let playback_exists = current
+                .lines()
+                .any(|line| line.split('\t').nth(1) == Some(playback_sink.as_str()));
+            if !playback_exists {
+                let id = pactl(&[
+                    "load-module",
+                    "module-null-sink",
+                    &format!("sink_name={playback_sink}"),
+                    "rate=48000",
+                    "channels=2",
+                    "sink_properties=device.description=SirenPlayback",
+                ])?;
+                playback_module = Some(id.trim().to_string());
+                log::warn!(
+                    "isolation: playback sink {playback_sink} was gone (PipeWire restart?), re-created as a null sink"
+                );
+            }
         }
 
         let source = format!("{capture_sink}.monitor");
@@ -160,6 +193,7 @@ pub fn setup(
             playback_sink: playback_sink.clone(),
             loopback_module: loopback_module.clone(),
             sink_module: sink_module.clone(),
+            playback_module: playback_module.clone(),
             lock_path: lock_path.clone(),
         })
     })();
@@ -168,6 +202,9 @@ pub fn setup(
         Ok(isolation) => Ok(Some(isolation)),
         Err(error) => {
             if let Some(module) = &loopback_module {
+                let _ = pactl(&["unload-module", module]);
+            }
+            if let Some(module) = &playback_module {
                 let _ = pactl(&["unload-module", module]);
             }
             if let Some(module) = &sink_module {

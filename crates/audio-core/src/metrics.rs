@@ -10,6 +10,10 @@ use serde::Serialize;
 use crate::protocol::Codec;
 
 const SILENCE_DB: f32 = -120.0;
+/// The FFT bands are only refreshed by the receiver thread while packets land.
+/// Past this gap without a packet the last window is a frozen picture, so the
+/// snapshot stops reporting it instead of pretending the curve is live.
+const SPECTRUM_STALE_US: u64 = 1_000_000;
 
 pub fn linear_to_db(linear: f32) -> f32 {
     if !linear.is_finite() || linear <= 1e-6 {
@@ -47,7 +51,9 @@ pub struct StreamMetrics {
     pub label: String,
     /// Address the most recent copy arrived from (Wi-Fi peer or local tunnel).
     pub addr: Mutex<String>,
-    /// Carrier of the most recent copy: `wifi`, `bt` or `local`.
+    /// Carrier that delivered the most recent copy *into* this node: `wifi`,
+    /// `bt` or `local`. Empty until a packet actually lands — each side labels
+    /// its own inbound leg, so the two ends of one stream may differ honestly.
     pub path: Mutex<String>,
     /// 32 log-spaced band levels (0..1) for the UI EQ display.
     pub spectrum: Mutex<Vec<f32>>,
@@ -75,6 +81,9 @@ pub struct StreamMetrics {
     /// underruns, flushes and carrier switches all land here (F2's metric).
     pub clicks: AtomicU64,
     pub last_packet_us: AtomicU64,
+    /// Relay mix mask (`origin % 64` bits) carried by the newest packet, so the
+    /// panel can say how many nodes a N−1 stream actually contains.
+    pub mix_mask: AtomicU64,
     pub active: AtomicBool,
 }
 
@@ -94,7 +103,7 @@ impl StreamMetrics {
             stream_id,
             label,
             addr: Mutex::new(addr),
-            path: Mutex::new("wifi".into()),
+            path: Mutex::new(String::new()),
             spectrum: Mutex::new(Vec::new()),
             codec,
             gain_db: AtomicU32::new(0f32.to_bits()),
@@ -115,6 +124,7 @@ impl StreamMetrics {
             overflow_packets: AtomicU64::new(0),
             clicks: AtomicU64::new(0),
             last_packet_us: AtomicU64::new(0),
+            mix_mask: AtomicU64::new(0),
             active: AtomicBool::new(false),
         }
     }
@@ -153,6 +163,7 @@ impl StreamMetrics {
     pub fn snapshot(&self) -> StreamSnapshot {
         let now = now_us();
         let last = self.last_packet_us.load(Ordering::Relaxed);
+        let stalled = last == 0 || now.saturating_sub(last) > SPECTRUM_STALE_US;
         let rms = load_f32(&self.rms);
         let peak = load_f32(&self.peak);
         StreamSnapshot {
@@ -170,11 +181,15 @@ impl StreamMetrics {
                 .lock()
                 .map(|path| path.clone())
                 .unwrap_or_default(),
-            spectrum: self
-                .spectrum
-                .lock()
-                .map(|bands| bands.iter().map(|v| *v as f64).collect())
-                .unwrap_or_default(),
+            mix_count: self.mix_mask.load(Ordering::Relaxed).count_ones(),
+            spectrum: if stalled {
+                Vec::new()
+            } else {
+                self.spectrum
+                    .lock()
+                    .map(|bands| bands.iter().map(|v| *v as f64).collect())
+                    .unwrap_or_default()
+            },
             codec: self.codec.as_str().to_string(),
             active: self.active.load(Ordering::Relaxed),
             gain_db: sanitize(self.gain()),
@@ -241,8 +256,13 @@ pub struct StreamSnapshot {
     pub stream_id: u16,
     pub label: String,
     pub addr: String,
-    /// `wifi`, `bt` or `local` (loopback test link).
+    /// `wifi`, `bt` or `local` (loopback test link). Empty until the first
+    /// packet — a never-received stream has no carrier to report.
     pub path: String,
+    /// For the N−1 relay mix (`stream_id == 0xFFF0`): how many origin bits the
+    /// newest header carried, i.e. how many nodes are folded into this stream.
+    /// Zero for device streams.
+    pub mix_count: u32,
     /// 32 log-spaced band levels (0..1), empty until enough audio arrives.
     pub spectrum: Vec<f64>,
     pub codec: String,
@@ -387,5 +407,50 @@ impl MetricsRegistry {
     pub fn set_muted(&self, id: u64, muted: bool) -> bool {
         self.with_stream(id, |stream| stream.muted.store(muted, Ordering::Relaxed))
             .is_some()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stream() -> StreamMetrics {
+        StreamMetrics::new(
+            1,
+            2,
+            7,
+            "test".into(),
+            "127.0.0.1:47900".into(),
+            Codec::RawF32,
+            30.0,
+        )
+    }
+
+    #[test]
+    fn carrier_is_unknown_until_a_packet_arrives() {
+        // A fabricated "wifi" made an unheard-of stream look like it was already
+        // running on the Wi-Fi carrier.
+        let metrics = stream();
+        assert_eq!(metrics.snapshot().path, "");
+        assert_eq!(metrics.snapshot().mix_count, 0);
+        metrics.set_source("127.0.0.1:47916", "bt");
+        assert_eq!(metrics.snapshot().path, "bt");
+    }
+
+    #[test]
+    fn stale_spectrum_is_dropped_instead_of_frozen() {
+        let metrics = stream();
+        metrics.set_spectrum(&[0.4; 32]);
+        metrics
+            .last_packet_us
+            .store(now_us(), Ordering::Relaxed);
+        assert_eq!(metrics.snapshot().spectrum.len(), 32);
+        metrics
+            .last_packet_us
+            .store(now_us().saturating_sub(SPECTRUM_STALE_US + 1), Ordering::Relaxed);
+        assert!(
+            metrics.snapshot().spectrum.is_empty(),
+            "no packets arriving means no live curve to show"
+        );
     }
 }

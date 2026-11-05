@@ -392,12 +392,19 @@ fn supervise(
     // Remembered hubs this node is allowed to dial: only one with a smaller uid,
     // i.e. one that is the hub by election. Dialing a larger-uid peer would make
     // both ends connect to each other at the same time.
+    // An address equal to our own adapter is this machine (a second process),
+    // never a hub worth dialling.
+    let shares_adapter = |address: &str| {
+        local
+            .as_deref()
+            .is_some_and(|mine| mine.eq_ignore_ascii_case(address))
+    };
     let dial_targets = |remembered: &[RememberedHub]| -> Vec<RememberedHub> {
         remembered
             .iter()
             .filter(|entry| {
                 let uid = uid_of(&entry.id);
-                uid != 0 && uid < self_uid
+                uid != 0 && uid < self_uid && !shares_adapter(&entry.bt)
             })
             .cloned()
             .collect()
@@ -411,11 +418,16 @@ fn supervise(
             remembered
                 .iter()
                 .filter(|entry| {
-                    topology
-                        .iter()
-                        .find(|peer| peer.bt.as_deref() == Some(entry.bt.as_str()))
-                        .map(|peer| peer.uid != 0 && peer.uid < self_uid)
-                        .unwrap_or(false)
+                    !shares_adapter(&entry.bt)
+                        && topology
+                            .iter()
+                            .find(|peer| {
+                                peer.bt
+                                    .as_deref()
+                                    .is_some_and(|mine| mine.eq_ignore_ascii_case(&entry.bt))
+                            })
+                            .map(|peer| peer.uid != 0 && peer.uid < self_uid)
+                            .unwrap_or(false)
                 })
                 .cloned()
                 .collect()
@@ -1156,6 +1168,12 @@ fn elect(
         if peer.id == self_id {
             continue;
         }
+        // A peer advertising *our own* adapter address is another process on this
+        // machine. Dialling it opens a loopback RFCOMM link: one radio counted as
+        // two links, and the mix comes straight back into our own sender.
+        if local.is_some_and(|mine| mine.eq_ignore_ascii_case(address)) {
+            continue;
+        }
         candidates.push(Candidate {
             id: peer.id.clone(),
             uid: uid_of(&peer.id),
@@ -1226,6 +1244,22 @@ mod tests {
         let (hub, candidates) = elect("00000000000000aa", "self", None, &topology);
         assert!(hub.is_none());
         assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn a_second_process_on_the_same_radio_is_not_a_hub() {
+        // Two nodes on one machine advertise the same adapter address. Electing
+        // that peer would dial our own radio: one link counted twice, and the
+        // hub's mix looping straight back into its own sender.
+        let topology = vec![peer("0000000000000001", Some("aa:aa:aa:aa:aa:01"))];
+        let (hub, candidates) = elect(
+            "00000000000000aa",
+            "self",
+            Some("AA:AA:AA:AA:AA:01"),
+            &topology,
+        );
+        assert_eq!(candidates.len(), 1, "only this node is a candidate");
+        assert_eq!(hub.expect("self is the hub").id, "00000000000000aa");
     }
 
     #[test]

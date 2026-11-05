@@ -378,17 +378,29 @@ function plainName(peer) { return String(peer?.name || "").replace(/ \(mesh\)$/i
 
 function streamName(stream, snap) {
   const mix = Number(stream.stream_id) === MIX_STREAM_ID;
+  const mixLabel = mix
+    ? (Number(stream.mix_count) > 0 ? "混音 · 含 " + Number(stream.mix_count) + " 路" : "混音")
+    : "";
   for (const peer of [...(snap?.peers || []), ...(snap?.topology || [])]) {
     if (peer.uid && peer.uid === stream.origin) {
       const name = plainName(peer);
-      return mix ? name + " · 混音" : name;
+      return mix ? name + " · " + mixLabel : name;
     }
   }
-  return mix ? "混音流" : String(stream.label || stream.id);
+  return mix ? mixLabel : String(stream.label || stream.id);
 }
 
 function deviceStreams(snap) {
   return (snap?.center?.streams || []).filter((s) => Number(s.stream_id) !== MIX_STREAM_ID);
+}
+/* 已发现但这一轮没有上行的人：卡位照样占住并写明原因，别让"N 台"和卡片数对不上。 */
+function idleNodes(snap) {
+  const speaking = new Set(deviceStreams(snap).map((s) => s.origin));
+  const out = [];
+  for (const peer of snap?.peers || []) {
+    if (peer.uid && !speaking.has(peer.uid)) out.push(peer.name || String(peer.uid).slice(0, 6));
+  }
+  return out;
 }
 /* 心跳按节点量测，流按 origin 归属节点。 */
 function peerFor(stream, snap) {
@@ -507,7 +519,8 @@ function configFromForm() {
 
 /* 设备卡 */
 function slotMarkup(index, stream, snap) {
-  const name = stream ? esc(streamName(stream, snap)) : "等待节点";
+  const idle = stream ? null : idleNodes(snap)[index];
+  const name = stream ? esc(streamName(stream, snap)) : (idle ? `${esc(idle)} · 无上行` : "等待节点");
   const gain = stream ? Number(stream.gain_db) || 0 : -60;
   const muted = Boolean(stream?.muted);
   const accent = CURVE_COLORS[index % CURVE_COLORS.length];
@@ -539,7 +552,7 @@ function slotMarkup(index, stream, snap) {
           <div class="buf">缓冲<b class="${bufClass(stream)}">${bufLabel(stream)}</b></div>
         </div>
         <div class="well facts">
-          <div class="fact">路径<b>${stream ? esc(pathLabel(stream.path)) : "—"}</b></div>
+          <div class="fact">入向<b>${stream ? esc(pathLabel(stream.path)) : "—"}</b></div>
           <div class="fact">丢帧<b>${stream ? (Number(stream.lost_frames) || 0) : 0}</b></div>
           <div class="fact">欠载<b>${stream ? (Number(stream.underruns) || 0) : 0}</b></div>
           <div class="fact">咔哒<b>${stream ? (Number(stream.clicks) || 0) : 0}</b></div>
@@ -633,7 +646,12 @@ function drawEq(snap) {
   ctx.font = "700 17px " + font;
   ctx.fillText("S I R E N :", (plot.left + plot.right) / 2, plot.top + 50);
 
-  const streams = deviceStreams(snap);
+  let streams = deviceStreams(snap);
+  if (!streams.length) {
+    // 只收到中心 N−1 混音、没有设备上行的节点不能整屏空白：电平在跳却看不见曲线，
+    // 看起来像坏了。这时把混音本身画出来，它的名字已经写明是混音。
+    streams = (snap?.center?.streams || []).filter((s) => Number(s.stream_id) === MIX_STREAM_ID);
+  }
   let legendX = plot.left + 2;
   streams.forEach((stream, index) => {
     const color = CURVE_COLORS[index % CURVE_COLORS.length];
@@ -694,7 +712,10 @@ function render() {
   const cfg = s.config || {};
   const streams = deviceStreams(snap);
   const origins = new Set(streams.map((x) => x.origin));
-  const devices = Math.max((snap.peers?.length || 0) + 1, origins.size + 1);
+  // 在线节点 = peers（引擎按 node id 去重后）∪ 有上行的 origin；与设备卡同源。
+  const online = new Set(origins);
+  for (const peer of snap.peers || []) if (peer.uid) online.add(peer.uid);
+  const devices = online.size + 1;
   trackHealth(snap.center?.streams || []);
 
   pill.className = "statuspill" + (s.running ? " on" : s.starting ? " busy" : "");

@@ -737,11 +737,15 @@ impl Tunnel {
                                 }
                                 log::info!("bt: link {id} silent for 10s, closed");
                             }
-                            if !link_origins.is_empty() {
-                                relay_stats
-                                    .links
-                                    .store(writers.len(), Ordering::Relaxed);
-                            }
+                            // Always publish the surviving count. Gating this on
+                            // "some link still has an origin" left the panel
+                            // showing the pre-sweep number forever — a hub with
+                            // two peers advertised seven links, then zero links,
+                            // because the sweep that emptied the table also
+                            // skipped the store.
+                            relay_stats
+                                .links
+                                .store(writers.len(), Ordering::Relaxed);
                         }
                     }
                 })

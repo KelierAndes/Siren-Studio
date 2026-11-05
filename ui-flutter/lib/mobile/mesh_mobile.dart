@@ -96,7 +96,7 @@ class _MeshMobileState extends State<MeshMobile> {
                       label: peer.displayName,
                       value: peer.bt == null
                           ? peer.endpoint
-                          : '${peer.endpoint} · BT ${peer.bt}',
+                          : '${peer.endpoint} · 蓝牙 ${peer.bt}',
                       color: AppColors.accent,
                     ),
                   ),

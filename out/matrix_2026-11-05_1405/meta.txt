@@ -1,0 +1,8 @@
+started=2026-11-05T14:05:33.447507
+commit=bd3f39c
+minutes_per_fault=3.0
+pc_exe=E:\SirenStudio\ui-flutter\build\windows\x64\runner\Release\siren_ui.exe
+nas_binary=siren 0.0.2
+phone=14
+nas_wifi_before=wlp3s0:connected
+p2p-dev-wlp3s0:disconnected

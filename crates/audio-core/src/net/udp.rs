@@ -235,18 +235,23 @@ impl FramePacker {
     }
 }
 
+/// 未指定地址按本机回环处理（单测与单机多节点都用它）。
+fn connect_target(target: SocketAddr) -> SocketAddr {
+    if target.ip().is_unspecified() {
+        SocketAddr::new(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            target.port(),
+        )
+    } else {
+        target
+    }
+}
+
 impl UdpSender {
     pub fn new(target: SocketAddr, codec: Codec, frame_ms: u16, origin: u64) -> Result<Self> {
         let socket = UdpSocket::bind("0.0.0.0:0")?;
         socket.set_write_timeout(Some(Duration::from_millis(200)))?;
-        let socket_target = if target.ip().is_unspecified() {
-            SocketAddr::new(
-                std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
-                target.port(),
-            )
-        } else {
-            target
-        };
+        let socket_target = connect_target(target);
         socket.connect(socket_target)?;
         socket.set_nonblocking(true).ok();
         let hb_socket = UdpSocket::bind("0.0.0.0:0")?;
@@ -369,6 +374,26 @@ impl UdpSender {
             // next tick's refresh retries.
             self.fail_streak += 1;
         }
+    }
+
+    /// 对端换了 IP（AP 漫游、重连拿到新租约、节点重启）时重建发送套接字，
+    /// 但保留 packer：stream id 与 seq 一旦回卷，接收端会把它当成一条新流，
+    /// 老流还要等 3 s 退役，期间两路互相抢时间线。
+    /// 返回是否真的换了目标。
+    pub fn retarget(&mut self, target: SocketAddr) -> Result<bool> {
+        let next = connect_target(target);
+        if next == self.target {
+            return Ok(false);
+        }
+        let socket = UdpSocket::bind("0.0.0.0:0")?;
+        socket.set_write_timeout(Some(Duration::from_millis(200)))?;
+        socket.connect(next)?;
+        socket.set_nonblocking(true).ok();
+        self.socket = socket;
+        self.target = next;
+        self.fail_streak = 0;
+        self.dead_until = None;
+        Ok(true)
     }
 
     fn push_outcome(&mut self, answered: bool) {
@@ -1539,6 +1564,9 @@ fn run(
                             last_mix_at = Instant::now();
                             mix_stream = Some(peer.id);
                             active_mix_mask = header.mix_mask;
+                            peer.metrics
+                                .mix_mask
+                                .store(header.mix_mask, Ordering::Relaxed);
                         }
                         peer.metrics.set_source(&addr.to_string(), path);
                         peer.last_path_bt = is_bt;
@@ -2348,6 +2376,35 @@ mod tests {
         assert_eq!(health.loss_pct, 0.0);
         receiver.stop();
         let _ = mixer;
+    }
+
+    #[test]
+    fn sender_retarget_follows_a_changed_ip_without_rewinding_the_sequence() {
+        // E4：peers/senders 都以 node id 为键，只改 peer.addr 不会重建发送端，
+        // 包会一直发往旧地址（实测 NAS 的 topology 里 PC 已从 .107 换成 .214，
+        // PC 始终收不到 Linux 的一路流）。重定向必须换地址、但绝不能重建 packer：
+        // seq 一回卷，接收端就把它当新流，旧流还要等 3 s 退役。
+        let old = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let fresh = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let mut sender =
+            UdpSender::new(old.local_addr().unwrap(), Codec::RawF32, 5, 0xabc).unwrap();
+        let pcm = vec![0.1f32; 240 * 2];
+
+        sender.send(&pcm).unwrap();
+        let mut buf = vec![0u8; 4096];
+        let (len, _from) = old.recv_from(&mut buf).unwrap();
+        let before = crate::protocol::FrameHeader::decode(&buf[..len]).unwrap().0.seq;
+
+        assert!(sender.retarget(fresh.local_addr().unwrap()).unwrap());
+        assert!(
+            !sender.retarget(fresh.local_addr().unwrap()).unwrap(),
+            "同一个地址不该重建套接字"
+        );
+
+        sender.send(&pcm).unwrap();
+        let (len, _from) = fresh.recv_from(&mut buf).unwrap();
+        let after = crate::protocol::FrameHeader::decode(&buf[..len]).unwrap().0.seq;
+        assert_eq!(after, before + 1, "seq 必须连续，不能像新流一样回卷");
     }
 
     #[test]

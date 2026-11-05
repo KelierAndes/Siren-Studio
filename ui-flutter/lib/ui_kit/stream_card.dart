@@ -381,7 +381,7 @@ class _Facts extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _row('路径', channel.pathText),
+          _row('入向', channel.pathText),
           _row('丢帧', '${channel.lostFrames}'),
           _row('欠载', '${channel.underruns}'),
           _row('延迟 ms', _latencyText),

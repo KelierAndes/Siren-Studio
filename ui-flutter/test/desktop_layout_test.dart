@@ -76,7 +76,7 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.textContaining('1/2'), findsOneWidget);
     expect(find.text('当前电平'), findsNWidgets(2));
-    expect(find.text('路径'), findsNWidgets(2));
+    expect(find.text('入向'), findsNWidgets(2));
     expect(find.text('丢帧'), findsNWidgets(2));
     expect(find.text('欠载'), findsNWidgets(2));
     expect(find.text('延迟 ms'), findsNWidgets(2));

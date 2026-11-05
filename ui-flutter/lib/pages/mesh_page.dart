@@ -451,9 +451,11 @@ class _MeshPageState extends State<MeshPage> {
                         ),
                         const SizedBox(width: 8),
                         Text(
+                          // "蓝牙 <mac>" 是已知的 RFCOMM 地址（能力），不是当前载波：
+                          // 双栈并行发送，两端各自看到的入向可能不同，写"BT 连接"会被读成链路只走蓝牙。
                           peer.bt == null
                               ? peer.endpoint
-                              : '${peer.endpoint} · BT ${peer.bt}',
+                              : '${peer.endpoint} · 蓝牙 ${peer.bt}',
                           style: AppText.mono.copyWith(
                             color: AppColors.textFaint,
                             fontSize: 11,

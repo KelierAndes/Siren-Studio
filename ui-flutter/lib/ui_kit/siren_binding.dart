@@ -120,10 +120,24 @@ class SirenBinding {
         for (final stream in streams)
           if (stream.streamId != 0xFFF0) stream.origin,
       };
-      final discovered = (mesh?.peers.length ?? 0) + 1;
-      final devices = discovered > origins.length + 1 ? discovered : origins.length + 1;
+      // 在线节点 = peers（引擎已按 node id 去重）∪ 有上行的 origin。台数与设备卡
+      // 都从这一个集合派生：以前台数读 peers.length、卡片读 streams，两者不同源，
+      // 于是出现"顶栏写 3 台、下面只画 1 张卡"。
+      final online = <String, String>{};
+      for (final peer in mesh?.peers ?? const <MeshPeerState>[]) {
+        if (peer.uid.isNotEmpty) online.putIfAbsent(peer.uid, () => peer.name);
+      }
+      for (final stream in streams) {
+        if (stream.streamId != 0xFFF0) {
+          online.putIfAbsent(
+              stream.origin, () => stream.origin.substring(0, 6).toUpperCase());
+        }
+      }
+      final devices = online.length + 1;
+      // 已发现但这一页没有它上行的人：卡位要占住并写明原因，而不是留空。
+      final idle = online.entries.where((e) => !origins.contains(e.key)).toList();
       if (running) {
-        visual.setStatusText('组网中 · $devices 台');
+        visual.setStatusText('组网中 · $devices 台 · ${origins.length} 路上行');
       } else {
         visual.setStatusText('未组网');
       }
@@ -162,9 +176,14 @@ class SirenBinding {
       _counters.removeWhere((id, _) => !seen.contains(id));
       _lastIssue.removeWhere((id, _) => !seen.contains(id));
 
-      final curves = <EqCurve>[];      for (final stream in streams) {
-        // 0xFFF0 is the hub relay mix, not a device: it would swamp the chart.
-        if (stream.streamId == 0xFFF0) continue;
+      final curves = <EqCurve>[];
+      StreamState? relayMix;
+      for (final stream in streams) {
+        // 0xFFF0 是中心的 N−1 转发混音，不是一台设备：和设备曲线同画会压满图表。
+        if (stream.streamId == 0xFFF0) {
+          relayMix = stream;
+          continue;
+        }
         curves.add(
           EqCurve(
             name: mesh!.streamName(stream),
@@ -172,6 +191,20 @@ class SirenBinding {
             bands: stream.spectrum,
             gainDb: stream.gainDb,
             active: stream.active && !stream.muted,
+          ),
+        );
+      }
+      // 只收到混音、没有设备上行的节点不能整屏空白：电平在跳却看不见曲线，
+      // 看起来像坏了。这时把混音本身画出来，名字已经写明它是混音。
+      if (curves.isEmpty && relayMix != null) {
+        final mix = relayMix;
+        curves.add(
+          EqCurve(
+            name: mesh!.streamName(mix),
+            color: _curveColor(0),
+            bands: mix.spectrum,
+            gainDb: mix.gainDb,
+            active: mix.active && !mix.muted,
           ),
         );
       }
@@ -194,7 +227,8 @@ class SirenBinding {
         final channel = visual.channels[i];
         final stream = _streamAt(i);
         if (stream == null) {
-          channel.setTitle('等待节点');
+          final gap = i < idle.length ? idle[i] : null;
+          channel.setTitle(gap == null ? '等待节点' : '${gap.value} · 无上行');
           channel.setFacts(
             rms: -60,
             path: '—',

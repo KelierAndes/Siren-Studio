@@ -959,7 +959,31 @@ fn run_mesh_sender(
             .as_ref()
             .map(|pw| Arc::new(crate::net::crypto::MeshKey::from_password(pw)));
         for (endpoint, peer) in &current {
-            if !senders.contains_key(endpoint) {
+            let existing = senders.get_mut(endpoint);
+            if let Some(sender) = existing {
+                // E4 只改 peer.addr 还不够：senders 以 node id 为键，键不变就
+                // 永远不重建发送端，包继续发往旧地址（实测 NAS 的 topology 里
+                // PC 已换成 .214，PC 却始终收不到 Linux 的一路流）。
+                //
+                // 但也不能每次抖动都跟着改绑：多网卡机器（NAS 的 eth .159 与
+                // Wi-Fi .196）的 mDNS 记录轮流给两个 A 记录，peer.addr 就来回翻，
+                // 跟着翻等于每几秒重连一次 socket（3 分钟健康基线里量到 39 次）。
+                // 只有当前目标确实听不到心跳应答时，才换发送地址。
+                let health = sender.path_health();
+                let unanswered =
+                    health.sent >= 4 && (health.samples == 0 || health.loss_pct >= 40.0);
+                if unanswered {
+                    match sender.retarget(peer.addr) {
+                        Ok(true) => log::info!(
+                            "mesh: {endpoint} retargeted to {} (downlink unanswered, hb loss {:.0} %)",
+                            peer.addr,
+                            health.loss_pct
+                        ),
+                        Ok(false) => {}
+                        Err(error) => log::warn!("mesh: retarget {endpoint} failed: {error}"),
+                    }
+                }
+            } else {
                 match UdpSender::new(peer.addr, codec, config.frame_ms, origin) {
                     Ok(mut sender) => {
                         if let Some(key) = &mesh_key {
@@ -1110,6 +1134,12 @@ fn run_mesh_sender(
         let refresh_routes = hb_counter % (crate::net::udp::HB_TICKS as u32 * 60) == 0;
         for (endpoint, sender) in senders.iter_mut() {
             sender.poll_heartbeat();
+            if refresh_routes {
+                // F13：connected UDP 会把 connect 时选好的路由缓存下来。手机
+                // Wi-Fi 关掉再打开之后，发送方向仍留在旧接口（实测卡在蓝牙），
+                // 每 30 s 重绑一次让它回到当前默认路由。
+                sender.refresh_route();
+            }
             if hb_counter % (crate::net::udp::HB_TICKS as u32) == 0 {
                 sender.send_heartbeat();
             }
@@ -1456,24 +1486,53 @@ fn build_peer_snapshot(
     current: &HashMap<String, SendPeer>,
     health: &HashMap<String, crate::net::udp::PathHealth>,
 ) -> Vec<MeshPeer> {
-    current
-        .iter()
-        .filter(|(_, peer)| peer.pinned || peer.last_seen.elapsed() < PEER_UI_FRESHNESS)
-        .map(|(key, peer)| {
-            let measured = health.get(key.as_str()).filter(|h| h.samples > 0);
-            MeshPeer {
-                name: peer.name.clone(),
-                id: peer.id.clone(),
-                uid: node_uid(&peer.id),
-                endpoint: peer.addr.to_string(),
-                bit: peer.bit,
-                bt: peer.bt.clone(),
-                rtt_ms: measured.map(|h| h.rtt_p50_us as f64 / 1000.0),
-                rtt_p99_ms: measured.map(|h| h.rtt_p99_us as f64 / 1000.0),
-                loss_pct: measured.map(|h| h.loss_pct),
+    // 同一台物理机器可能占两个键：mDNS 发现的条目以 node id 为键，gossip 学到的
+    // 以地址为键（name 恒为 "gossip"），同名实例还会被 mDNS 自动加 "(2)" 后缀。
+    // 不去重就会出现"顶栏写 3 台、卡片只有 1 张"这种自相矛盾的读数。
+    let mut fresh: HashMap<String, (&String, &SendPeer)> = HashMap::new();
+    for (key, peer) in current {
+        if !(peer.pinned || peer.last_seen.elapsed() < PEER_UI_FRESHNESS) {
+            continue;
+        }
+        let group = if peer.id.is_empty() {
+            key.clone()
+        } else {
+            peer.id.clone()
+        };
+        match fresh.get(&group) {
+            Some((_, best)) if best.last_seen >= peer.last_seen => {}
+            _ => {
+                fresh.insert(group, (key, peer));
             }
-        })
-        .collect()
+        }
+    }
+    let known_ips: Vec<std::net::IpAddr> = fresh
+        .values()
+        .filter(|(_, peer)| !peer.id.is_empty())
+        .map(|(_, peer)| peer.addr.ip())
+        .collect();
+
+    let mut rows: Vec<MeshPeer> = Vec::new();
+    for (key, peer) in fresh.values() {
+        // 没有 id 的 gossip 行如果与某个已收录条目同 IP，就是同一台机器的重复计数。
+        if peer.id.is_empty() && known_ips.contains(&peer.addr.ip()) {
+            continue;
+        }
+        let measured = health.get(key.as_str()).filter(|h| h.samples > 0);
+        rows.push(MeshPeer {
+            name: peer.name.clone(),
+            id: peer.id.clone(),
+            uid: node_uid(&peer.id),
+            endpoint: peer.addr.to_string(),
+            bit: peer.bit,
+            bt: peer.bt.clone(),
+            rtt_ms: measured.map(|h| h.rtt_p50_us as f64 / 1000.0),
+            rtt_p99_ms: measured.map(|h| h.rtt_p99_us as f64 / 1000.0),
+            loss_pct: measured.map(|h| h.loss_pct),
+        });
+    }
+    rows.sort_by(|a, b| a.name.cmp(&b.name).then(a.endpoint.cmp(&b.endpoint)));
+    rows
 }
 
 fn resolve_ipv4(endpoint: &str) -> Result<SocketAddr> {
@@ -1585,6 +1644,60 @@ mod tests {
     }
 
     #[test]
+    fn peer_snapshot_counts_one_node_once_across_gossip_and_discovery() {
+        // 顶栏写"3 台"而卡片只有 1 张的根源：mDNS 条目以 node id 为键，gossip
+        // 学到的同一条以地址为键（name 恒为 "gossip"），两者都进快照就是重复计数。
+        let addr: SocketAddr = "192.168.2.107:47900".parse().unwrap();
+        let now = Instant::now();
+        let peers = HashMap::from([
+            (
+                "687ad46a475a5f7c".to_string(),
+                SendPeer {
+                    name: "SIREN-PC (mesh)".into(),
+                    id: "687ad46a475a5f7c".into(),
+                    addr,
+                    bit: Some(60),
+                    bt: Some("E0:8F:4C:16:9F:58".into()),
+                    pinned: false,
+                    last_seen: now,
+                },
+            ),
+            (
+                addr.to_string(),
+                SendPeer {
+                    name: "gossip".into(),
+                    id: String::new(),
+                    addr,
+                    bit: None,
+                    bt: None,
+                    pinned: false,
+                    last_seen: now,
+                },
+            ),
+            (
+                "72a176cebfe88db4".to_string(),
+                SendPeer {
+                    name: "Siren Node (mesh)".into(),
+                    id: "72a176cebfe88db4".into(),
+                    addr: "192.168.2.248:47900".parse().unwrap(),
+                    bit: Some(52),
+                    bt: None,
+                    pinned: false,
+                    last_seen: now,
+                },
+            ),
+        ]);
+        let snapshot = build_peer_snapshot(&peers, &HashMap::new());
+        assert_eq!(
+            snapshot.len(),
+            2,
+            "同一台机器的 gossip 行不该再算一台：{:?}",
+            snapshot.iter().map(|p| &p.name).collect::<Vec<_>>()
+        );
+        assert!(snapshot.iter().all(|p| p.name != "gossip"));
+    }
+
+    #[test]
     fn mesh_nodes_exchange_audio_without_manual_discovery() {
         // Node B: silent receiver. Node A pins B statically (discovery itself
         // needs live mDNS, exercised on real devices); B must hear A's tone.
@@ -1657,6 +1770,7 @@ mod tests {
             label: "test".into(),
             addr: "127.0.0.1:1".into(),
             path: "wifi".into(),
+            mix_count: 0,
             spectrum: vec![0.0; 32],
             codec: "s16".into(),
             active: true,
@@ -1712,6 +1826,7 @@ mod tests {
             "age_ms",
             "codec",
             "path",
+            "mix_count",
         ] {
             assert!(stream.get(field).is_some(), "stream.{field} missing from JSON contract");
         }

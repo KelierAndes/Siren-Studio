@@ -1,0 +1,315 @@
+{
+  "S1_pc_phone_dual": {
+    "pc": {
+      "switches": 0,
+      "switch_dirs": {},
+      "gap_count": 0,
+      "gap_max_ms": 0,
+      "gap_sum_ms": 0,
+      "trims": 1,
+      "trim_max_dropped_ms": 60.0,
+      "zeroruns_mix_over100ms": 0,
+      "carrier_seen": [
+        "wifi"
+      ],
+      "buffer_last_ms": [
+        100
+      ],
+      "underruns_last": 0,
+      "lost_frames_last": 0,
+      "bt_lines": 22,
+      "bt_link_end": 0,
+      "bt_link_peak": 0,
+      "hybrid": []
+    },
+    "phone": {
+      "switches": 0,
+      "switch_dirs": {},
+      "gap_count": 0,
+      "gap_max_ms": 0,
+      "gap_sum_ms": 0,
+      "trims": 0,
+      "trim_max_dropped_ms": 0,
+      "zeroruns_mix_over100ms": 0,
+      "carrier_seen": [
+        "wifi"
+      ],
+      "buffer_last_ms": [
+        92
+      ],
+      "underruns_last": 1,
+      "lost_frames_last": 0,
+      "bt_lines": 18,
+      "bt_link_end": 0,
+      "bt_link_peak": 0,
+      "hybrid": []
+    }
+  },
+  "S2_pc_phone_wifi_off": {
+    "pc": {
+      "switches": 0,
+      "switch_dirs": {},
+      "gap_count": 0,
+      "gap_max_ms": 0,
+      "gap_sum_ms": 0,
+      "trims": 2,
+      "trim_max_dropped_ms": 60.0,
+      "zeroruns_mix_over100ms": 2,
+      "carrier_seen": [
+        "wifi"
+      ],
+      "buffer_last_ms": [
+        142
+      ],
+      "underruns_last": 2,
+      "lost_frames_last": 12720,
+      "bt_lines": 24,
+      "bt_link_end": 0,
+      "bt_link_peak": 0,
+      "hybrid": []
+    },
+    "phone": {
+      "switches": 0,
+      "switch_dirs": {},
+      "gap_count": 0,
+      "gap_max_ms": 0,
+      "gap_sum_ms": 0,
+      "trims": 0,
+      "trim_max_dropped_ms": 0,
+      "zeroruns_mix_over100ms": 0,
+      "carrier_seen": [
+        "bt",
+        "wifi"
+      ],
+      "buffer_last_ms": [
+        239,
+        69
+      ],
+      "underruns_last": 2,
+      "lost_frames_last": 0,
+      "bt_lines": 21,
+      "bt_link_end": 0,
+      "bt_link_peak": 0,
+      "hybrid": []
+    }
+  },
+  "S3_tri_dual": {
+    "pc": {
+      "switches": 0,
+      "switch_dirs": {},
+      "gap_count": 0,
+      "gap_max_ms": 0,
+      "gap_sum_ms": 0,
+      "trims": 0,
+      "trim_max_dropped_ms": 0,
+      "zeroruns_mix_over100ms": 0,
+      "carrier_seen": [
+        "bt",
+        "wifi"
+      ],
+      "buffer_last_ms": [
+        97,
+        272
+      ],
+      "underruns_last": 3,
+      "lost_frames_last": 27600,
+      "bt_lines": 25,
+      "bt_link_end": 1,
+      "bt_link_peak": 1,
+      "hybrid": [
+        "hub accepted a link"
+      ]
+    },
+    "phone": {
+      "switches": 0,
+      "switch_dirs": {},
+      "gap_count": 0,
+      "gap_max_ms": 0,
+      "gap_sum_ms": 0,
+      "trims": 0,
+      "trim_max_dropped_ms": 0,
+      "zeroruns_mix_over100ms": 0,
+      "carrier_seen": [
+        "wifi"
+      ],
+      "buffer_last_ms": [
+        86
+      ],
+      "underruns_last": 2,
+      "lost_frames_last": 0,
+      "bt_lines": 18,
+      "bt_link_end": 0,
+      "bt_link_peak": 0,
+      "hybrid": []
+    },
+    "nas": {
+      "nas_snapshots": 179,
+      "streams": 2,
+      "buffer_ms": [
+        28,
+        55
+      ],
+      "underruns_delta": 65,
+      "lost_frames_delta": 15120,
+      "clicks_delta": 0,
+      "silent_ms_delta": 0,
+      "silent_gaps_delta": 0,
+      "mix_buffer_last_ms": null,
+      "mix_snapshots": 0,
+      "bt_state_end": "connected",
+      "bt_role_end": "leaf",
+      "bt_links_end": 1,
+      "bt_links_max": 1,
+      "rtt_ms": [
+        4.97,
+        5.003
+      ],
+      "unreachable_polls": 0
+    }
+  },
+  "S4_tri_phone_wifi_off": {
+    "pc": {
+      "switches": 0,
+      "switch_dirs": {},
+      "gap_count": 0,
+      "gap_max_ms": 0,
+      "gap_sum_ms": 0,
+      "trims": 8,
+      "trim_max_dropped_ms": 60.0,
+      "zeroruns_mix_over100ms": 0,
+      "carrier_seen": [
+        "bt",
+        "wifi"
+      ],
+      "buffer_last_ms": [
+        134,
+        289
+      ],
+      "underruns_last": 7,
+      "lost_frames_last": 39840,
+      "bt_lines": 23,
+      "bt_link_end": 0,
+      "bt_link_peak": 0,
+      "hybrid": []
+    },
+    "phone": {
+      "switches": 0,
+      "switch_dirs": {},
+      "gap_count": 0,
+      "gap_max_ms": 0,
+      "gap_sum_ms": 0,
+      "trims": 250,
+      "trim_max_dropped_ms": 60.0,
+      "zeroruns_mix_over100ms": 46,
+      "carrier_seen": [
+        "bt",
+        "wifi"
+      ],
+      "buffer_last_ms": [
+        108,
+        87,
+        217
+      ],
+      "underruns_last": 50,
+      "lost_frames_last": 0,
+      "bt_lines": 21,
+      "bt_link_end": 0,
+      "bt_link_peak": 0,
+      "hybrid": []
+    },
+    "nas": {
+      "nas_snapshots": 179,
+      "streams": 1,
+      "buffer_ms": [
+        260
+      ],
+      "underruns_delta": 0,
+      "lost_frames_delta": 0,
+      "clicks_delta": 0,
+      "silent_ms_delta": 0,
+      "silent_gaps_delta": 0,
+      "mix_buffer_last_ms": 260,
+      "mix_snapshots": 179,
+      "bt_state_end": "connected",
+      "bt_role_end": "leaf",
+      "bt_links_end": 1,
+      "bt_links_max": 1,
+      "rtt_ms": [
+        4.972
+      ],
+      "unreachable_polls": 0
+    }
+  },
+  "S5_tri_phone_nas_wifi_off": {
+    "pc": {
+      "switches": 0,
+      "switch_dirs": {},
+      "gap_count": 0,
+      "gap_max_ms": 0,
+      "gap_sum_ms": 0,
+      "trims": 5,
+      "trim_max_dropped_ms": 60.0,
+      "zeroruns_mix_over100ms": 0,
+      "carrier_seen": [
+        "bt",
+        "wifi"
+      ],
+      "buffer_last_ms": [
+        157,
+        274
+      ],
+      "underruns_last": 9,
+      "lost_frames_last": 55680,
+      "bt_lines": 24,
+      "bt_link_end": 0,
+      "bt_link_peak": 0,
+      "hybrid": []
+    },
+    "phone": {
+      "switches": 0,
+      "switch_dirs": {},
+      "gap_count": 0,
+      "gap_max_ms": 0,
+      "gap_sum_ms": 0,
+      "trims": 230,
+      "trim_max_dropped_ms": 60.0,
+      "zeroruns_mix_over100ms": 45,
+      "carrier_seen": [
+        "bt",
+        "wifi"
+      ],
+      "buffer_last_ms": [
+        301,
+        83
+      ],
+      "underruns_last": 51,
+      "lost_frames_last": 0,
+      "bt_lines": 21,
+      "bt_link_end": 0,
+      "bt_link_peak": 0,
+      "hybrid": []
+    },
+    "nas": {
+      "nas_snapshots": 179,
+      "streams": 1,
+      "buffer_ms": [
+        259
+      ],
+      "underruns_delta": 0,
+      "lost_frames_delta": 0,
+      "clicks_delta": 0,
+      "silent_ms_delta": 0,
+      "silent_gaps_delta": 0,
+      "mix_buffer_last_ms": 259,
+      "mix_snapshots": 179,
+      "bt_state_end": "connected",
+      "bt_role_end": "leaf",
+      "bt_links_end": 1,
+      "bt_links_max": 1,
+      "rtt_ms": [
+        4.981
+      ],
+      "unreachable_polls": 0
+    }
+  }
+}

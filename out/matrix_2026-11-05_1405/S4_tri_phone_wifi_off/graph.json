@@ -1,0 +1,10 @@
+{
+  "sinks": {
+    "siren_capture": "52",
+    "play_sink": "60"
+  },
+  "default_sink": "siren_capture",
+  "monitor_sink_id": "60",
+  "play_sink_id": "60",
+  "sender_tx_rms_db": -120.0
+}
