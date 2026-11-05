@@ -36,17 +36,27 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import collect_1h as harness  # noqa: E402
 import matrix_dualstack as M  # noqa: E402
 
-SEND_FAIL = re.compile(r"send failed")
+SEND_FAIL = re.compile(
+    # 产品两处措辞都要认：mesh 上行是 "mesh: send to 1.2.3.4:47900 failed: ..."，
+    # center-send 是 "sender: send failed: ..."。只写 "send failed" 会让 mesh 路径
+    # 永远计数为 0 —— A1 第一次三组"全 0"就是这么来的盲区。
+    r"send (?:to \S+ )?failed|EAGAIN|Resource temporarily unavailable|WouldBlock")
+SEND_FAIL_TARGET = re.compile(
+    r"^(\d\d-\d\d \d\d:\d\d:\d\d)[.\d]*.*send to (\S+) failed", re.M)
 GAP = M.GAP
 SWITCH = M.SWITCH
 ROAM = re.compile(r"[Rr]oam(?:ing)?\s*[:=]\s*(\d+)")
 WAKEUPS = re.compile(r"total wakeups[:\s]+(\d+)")
 
 GROUPS = [
-    ("G1_bt_off", {"bluetooth": False, "wifi_sleep": None}),
-    ("G2_wifi_powersave", {"bluetooth": None, "wifi_sleep": "1"}),
-    ("G3_both", {"bluetooth": False, "wifi_sleep": "1"}),
+    # 每组显式给两个开关，不继承"上一轮的前态"：上一轮被 kill 时 finally 没跑到，
+    # wifi_sleep_policy 停在 1，于是三组都变成"省电开"，省电对照直接消失（18:15 那轮）。
+    # 基线 = 同日矩阵 S3 窗口（蓝牙开 + 省电关），不额外占设备时间。
+    ("G1_bt_off", {"bluetooth": False, "wifi_sleep": "2"}),      # 只关蓝牙
+    ("G2_wifi_powersave", {"bluetooth": True, "wifi_sleep": "1"}),  # 只开 Wi-Fi 省电
+    ("G3_both", {"bluetooth": False, "wifi_sleep": "1"}),        # 两者都改
 ]
+RESTORE_WIFI_SLEEP = "2"  # 本机常态：不省电
 
 
 def adb(cmd: str) -> str:
@@ -84,12 +94,27 @@ def sample_wifi() -> dict:
     return out
 
 
+def multi_target_stalls(text: str) -> int:
+    """同一秒里对 ≥2 个目标发送失败的次数 —— A1 的原始签名（网卡 TX 队列被堵）。"""
+    per_second: dict[str, set[str]] = {}
+    for second, target in SEND_FAIL_TARGET.findall(text):
+        per_second.setdefault(second, set()).add(target)
+    return sum(1 for targets in per_second.values() if len(targets) >= 2)
+
+
 def run_group(name: str, knobs: dict, minutes: float, directory: Path) -> dict:
     directory.mkdir(parents=True, exist_ok=True)
     set_state(knobs.get("bluetooth"), knobs.get("wifi_sleep"))
     state = read_state()
     (directory / "state.json").write_text(
         json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 三组的前提是 Linux 节点真的在网：进程活着不代表入网（有人点过"离开组网"后
+    # --autostart 不会再生效）。不满足就中止，别把两节点数据记成一组。
+    joined = M.ensure_nas_joined(require_peers=True, timeout=90)
+    (directory / "nas.joined.json").write_text(
+        json.dumps(joined, ensure_ascii=False, indent=2), encoding="utf-8")
+    if not joined.get("running") or not joined.get("peers"):
+        raise RuntimeError(f"{name}: NAS 未入网（{joined}），本组不采")
     time.sleep(20)
     adb("logcat -c")
     wifi_samples = []
@@ -110,6 +135,7 @@ def run_group(name: str, knobs: dict, minutes: float, directory: Path) -> dict:
         "state": state,
         "minutes": minutes,
         "send_failed": len(SEND_FAIL.findall(text)),
+        "multi_target_stalls": multi_target_stalls(text),
         "gaps": len(gaps),
         "gap_max_ms": max(gaps, default=0),
         "gap_sum_ms": round(sum(gaps), 1),
@@ -162,11 +188,11 @@ def main() -> int:
                   f"send_failed={rows[-1]['send_failed']} gaps={rows[-1]['gaps']}"
                   f"/{rows[-1]['gap_sum_ms']} ms", flush=True)
             # 组间回到三机正常态，避免上一组的开关影响下一组的入网
-            set_state(True, before.get("wifi_sleep_policy") or "2")
+            set_state(True, RESTORE_WIFI_SLEEP)  # 常态=不省电；不沿用可能被污染的前态
             time.sleep(30)
             M.phone_start()
     finally:
-        set_state(True, before.get("wifi_sleep_policy") or "2")
+        set_state(True, RESTORE_WIFI_SLEEP)  # 常态=不省电；不沿用可能被污染的前态
         (out / "state.after.json").write_text(
             json.dumps(read_state(), ensure_ascii=False, indent=2), encoding="utf-8")
         harness.adb_shell(f"am force-stop {harness.PHONE_PKG}")
@@ -176,11 +202,12 @@ def main() -> int:
 
     (out / "groups.json").write_text(
         json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
-    header = ("| 组 | 蓝牙 on | Wi-Fi 省电策略 | send_failed | 洞次/最长/合计 ms | 切换 | 修剪 | RSSI 最低 | 速率最低 | idle 唤醒增量 |\n"
-              "| :-- | :-- | :-- | --: | :-- | --: | --: | --: | --: | --: |\n")
+    header = ("| 组 | 蓝牙 on | Wi-Fi 省电策略 | send_failed | 多目标同秒失败 | 洞次/最长/合计 ms | 切换 | 修剪 | RSSI 最低 | 速率最低 | idle 唤醒增量 |\n"
+              "| :-- | :-- | :-- | --: | --: | :-- | --: | --: | --: | --: | --: |\n")
     body = "".join(
         f"| {r['group']} | {r['state']['bluetooth_on']} | {r['state']['wifi_sleep_policy']} | "
-        f"{r['send_failed']} | {r['gaps']}/{r['gap_max_ms']:.0f}/{r['gap_sum_ms']} | "
+        f"{r['send_failed']} | {r.get('multi_target_stalls', 0)} | "
+        f"{r['gaps']}/{r['gap_max_ms']:.0f}/{r['gap_sum_ms']} | "
         f"{r['switches']} | {r['trims']} | {r['rssi_min']} | {r['link_speed_min']} | {r['wakeups_delta']} |\n"
         for r in rows)
     verdict = [
@@ -189,10 +216,14 @@ def main() -> int:
         "基线（同日矩阵 S3 三机双栈窗口，不关任何开关）：`send_failed=0`、`audible gap=0` — "
         "见 out/matrix_2026-11-05_1405/S3_tri_dual/phone.logcat.txt。",
         "",
+        "计数口径：`send_failed` 认两种措辞（`mesh: send to <addr> failed` 与 "
+        "`sender: send failed`）以及 EAGAIN/WouldBlock 文本；`多目标同秒失败` = 同一秒里对 "
+        "≥2 个目标发送失败（A1 的原始签名：手机 TX 队列被堵，不是某条路径的问题）。",
+        "",
         header + body,
         "",
-        "判定规则：某组里 send_failed 与 ~1.1 s 洞同时出现 → 与该开关相关；三组全为 0 → "
-        "软件侧无法定位，按 E5 的原计划转固件/AP（不再改软件）。",
+        "判定规则：某组里 send_failed（尤其多目标同秒失败）与 ~1.1 s 洞同时出现 → 与该开关相关；"
+        "三组全为 0 → 软件侧无法定位，按 E5 的原计划转固件/AP（不再改软件）。",
     ]
     (out / "verdict.md").write_text("\n".join(verdict) + "\n", encoding="utf-8")
     print("\n".join(verdict))

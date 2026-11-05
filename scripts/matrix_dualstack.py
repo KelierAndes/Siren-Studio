@@ -99,19 +99,66 @@ def daemon_running() -> bool:
     return nas_sh("pgrep -x siren | wc -l").strip() not in ("", "0")
 
 
+def nas_status() -> dict | None:
+    try:
+        with urllib.request.urlopen(
+                f"http://{harness.NAS_HOST}:8090/api/status", timeout=3) as resp:
+            return json.loads(resp.read().decode("utf-8", "replace"))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def ensure_nas_joined(require_peers: bool = False, timeout: float = 60.0) -> dict:
+    """守护进程活着 ≠ 已入网。
+
+    `--autostart` 只在进程启动时生效；有人（或页面）点过"离开组网"之后，进程还在、
+    `snapshot` 却是 null，此后所有场景测的都是两节点网络（2026-11-05 A1 三组就是这样
+    白跑的）。这里用 /api/status 断言"真的入网了"，必要时 POST /api/start 重新加入。
+    """
+    payload = {
+        "name": "Linux-ISO", "source": "tone", "freq": 440.0, "output": True,
+        "target_ms": 30.0, "port": 47900, "codec": "raw", "frame_ms": 5,
+        "output_sink": "play_sink",
+    }
+    deadline = time.time() + timeout
+    started = False
+    while time.time() < deadline:
+        status = nas_status() or {}
+        snap = status.get("snapshot") or {}
+        running = bool(snap.get("running"))
+        peers = snap.get("peers") or []
+        if running and (peers or not require_peers):
+            return {"running": True, "peers": len(peers), "restarted": started}
+        if not running and not started:
+            body = json.dumps(payload)
+            nas_sh("curl -s -m 3 -X POST -H 'Content-Type: application/json' "
+                   f"-d '{body}' localhost:8090/api/start")
+            started = True
+        time.sleep(3)
+    status = nas_status() or {}
+    snap = status.get("snapshot") or {}
+    return {"running": bool(snap.get("running")), "peers": len(snap.get("peers") or []),
+            "restarted": started, "timed_out": True}
+
+
 def daemon_start() -> None:
-    if daemon_running():
-        return
-    # runuser 在 /usr/sbin，plink 的用户 shell 里没有 PATH，必须走 sudo（sudo 的
-    # secure_path 找得到）；守护被 kill 时隔离层的 Drop 不会执行，play_sink 也可能
-    # 已消失，两者叠加会让节点把混音播回自己采集的 monitor（自激测试音）。
-    nas_sudo_sh(
-        "runuser -u kelierandes -- env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "
-        "XDG_RUNTIME_DIR=/run/user/1000 setsid nohup /usr/local/bin/siren --log info web "
-        "--listen 0.0.0.0:8090 --isolate pipewire --output-sink play_sink --autostart "
-        "--source tone --freq 440 --name Linux-ISO --port 47900 >/tmp/siren-web.log 2>&1 & sleep 4"
-    )
-    time.sleep(3)
+    if not daemon_running():
+        # runuser 在 /usr/sbin，plink 的用户 shell 里没有 PATH，必须走 sudo（sudo 的
+        # secure_path 找得到）；守护被 kill 时隔离层的 Drop 不会执行，play_sink 也可能
+        # 已消失，两者叠加会让节点把混音播回自己采集的 monitor（自激测试音）。
+        nas_sudo_sh(
+            "runuser -u kelierandes -- env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "
+            "XDG_RUNTIME_DIR=/run/user/1000 setsid nohup /usr/local/bin/siren --log info web "
+            "--listen 0.0.0.0:8090 --isolate pipewire --output-sink play_sink --autostart "
+            "--source tone --freq 440 --name Linux-ISO --port 47900 "
+            ">/tmp/siren-web.log 2>&1 & sleep 4"
+        )
+        time.sleep(3)
+    # 进程活着 ≠ 已入网：有人点过"离开组网"后进程仍在、snapshot 为 null，而
+    # --autostart 只在进程启动时生效。这里始终断言"真的入网了"，必要时重新 POST start。
+    state = ensure_nas_joined()
+    log(f"NAS 守护就绪：running={state.get('running')} peers={state.get('peers')}"
+        + ("（已重新入网）" if state.get("restarted") else ""))
 
 
 def audio_graph_preflight() -> dict:
@@ -447,6 +494,12 @@ def run_scenario(name: str, topology: str, fault: str | None, directory: Path,
         daemon_stop()
     else:
         daemon_start()
+        joined = ensure_nas_joined(require_peers=True, timeout=90)
+        mark("joined", **joined)
+        if not joined.get("running") or not joined.get("peers"):
+            raise RuntimeError(
+                f"{name}: NAS 节点没有真正入网（running={joined.get('running')} "
+                f"peers={joined.get('peers')}）——三节点场景测不了，先修环境再跑")
         graph = audio_graph_preflight()
         (directory / "graph.json").write_text(json.dumps(graph, ensure_ascii=False, indent=2),
                                               encoding="utf-8")
