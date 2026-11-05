@@ -70,12 +70,17 @@ impl Advertiser {
         let channel_value = bt_channel
             .map(|channel| channel.to_string())
             .unwrap_or_default();
+        let proto_value = crate::protocol::MESH_PROTO_VERSION.to_string();
         let properties = [
             ("role", role),
             ("name", name),
             ("codec", codec),
             ("id", id),
             ("version", env!("CARGO_PKG_VERSION")),
+            // W1: peers gate capabilities on this (BT_KEEPALIVE_PROTO) — the
+            // browse side has always read it, but it was never published, so
+            // the tunnel keepalive could never negotiate on real devices.
+            ("proto", proto_value.as_str()),
             ("bit", bit_value.as_str()),
             ("bt", bt_value.as_str()),
             ("btch", channel_value.as_str()),
