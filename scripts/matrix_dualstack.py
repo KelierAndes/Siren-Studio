@@ -109,11 +109,12 @@ def nas_status() -> dict | None:
 
 
 def ensure_nas_joined(require_peers: bool = False, timeout: float = 60.0) -> dict:
-    """守护进程活着 ≠ 已入网。
+    """守护进程活着 ≠ 已入网；已入网 ≠ 音源正确。
 
     `--autostart` 只在进程启动时生效；有人（或页面）点过"离开组网"之后，进程还在、
     `snapshot` 却是 null，此后所有场景测的都是两节点网络（2026-11-05 A1 三组就是这样
-    白跑的）。这里用 /api/status 断言"真的入网了"，必要时 POST /api/start 重新加入。
+    白跑的）。这里用 /api/status 断言"真的入网了"；`deploy_nas.py` 用生产默认的
+    `--source loopback` 起守护，入网照样成功但上行全零（E2 抑制），所以音源也要断言。
     """
     payload = {
         "name": "Linux-ISO", "source": "tone", "freq": 440.0, "output": True,
@@ -125,19 +126,32 @@ def ensure_nas_joined(require_peers: bool = False, timeout: float = 60.0) -> dic
     while time.time() < deadline:
         status = nas_status() or {}
         snap = status.get("snapshot") or {}
+        source = (status.get("config") or {}).get("source")
         running = bool(snap.get("running"))
         peers = snap.get("peers") or []
-        if running and (peers or not require_peers):
-            return {"running": True, "peers": len(peers), "restarted": started}
-        if not running and not started:
+
+        def join() -> None:
             body = json.dumps(payload)
             nas_sh("curl -s -m 3 -X POST -H 'Content-Type: application/json' "
                    f"-d '{body}' localhost:8090/api/start")
+
+        if running and source != "tone" and not started:
+            # /api/start 在运行中返回 409，必须先离开再按测试音源加入。
+            nas_sh("curl -s -m 3 -X POST localhost:8090/api/stop")
+            time.sleep(3)
+            join()
+            started = True
+        elif running and source == "tone" and (peers or not require_peers):
+            return {"running": True, "peers": len(peers), "source": source,
+                    "restarted": started}
+        elif not running and not started:
+            join()
             started = True
         time.sleep(3)
     status = nas_status() or {}
     snap = status.get("snapshot") or {}
     return {"running": bool(snap.get("running")), "peers": len(snap.get("peers") or []),
+            "source": (status.get("config") or {}).get("source"),
             "restarted": started, "timed_out": True}
 
 

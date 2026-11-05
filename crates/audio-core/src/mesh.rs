@@ -810,7 +810,10 @@ fn run_mesh_sender(
     let mut restore_attempts: HashMap<String, u32> = HashMap::new();
     const ADAPT_RTT_US: u64 = 400_000;
     const ADAPT_HEALTHY_US: u64 = 200_000;
-    const ADAPT_BACK_TICKS: u32 = 60; // 30 s healthy before restoring
+    // The adaptive block runs once per captured frame, so a healthy window
+    // must be scaled by the frame period: a fixed tick count timed 0.3 s at
+    // 5 ms frames while the comment claimed 30 s.
+    let adapt_back_ticks = (30_000 / u32::from(config.frame_ms.max(1))).max(1);
     const ADAPT_OPUS_BITRATE: i32 = 48_000;
     let mut senders: HashMap<String, UdpSender> = HashMap::new();
     let mut tunnel_sender: Option<(SocketAddr, UdpSender)> = None;
@@ -1195,7 +1198,7 @@ fn run_mesh_sender(
                 if healthy {
                     *entry += 1;
                     let attempts = restore_attempts.get(endpoint).copied().unwrap_or(0);
-                    let backoff = ADAPT_BACK_TICKS << attempts.min(5);
+                    let backoff = adapt_back_ticks << attempts.min(5);
                     if *entry - 1 >= backoff && sender.codec() != codec {
                         match sender.set_codec(codec, None) {
                             Ok(()) => {

@@ -63,6 +63,14 @@ params_for() {
         jitter50) echo "delay 50ms 25ms distribution normal" ;;
         bw1800)   echo "rate 1800kbit" ;;
         bw1000)   echo "rate 1000kbit" ;;
+        # 2h 计划（E2E_TEST_PLAN_2H_v2 §7/§8）用的注入档；配合 AUDIO_ONLY=1 使用，
+        # 只整 udp/47900，不碰 SSH/控制面。
+        ge3)      echo "loss gemodel 0.15% 5% 100% 0%" ;;
+        blackout) echo "loss 100%" ;;
+        spike)    echo "delay 150ms 10ms" ;;
+        reorder)  echo "delay 20ms 15ms distribution normal reorder 25% 50%" ;;
+        dup)      echo "duplicate 5%" ;;
+        corrupt)  echo "corrupt 0.5%" ;;
         *) echo "netem.sh: unknown profile '$1' (clean loss2 loss10 burst delay200 jitter50 bw1800 raw)" >&2; exit 1 ;;
     esac
 }
@@ -77,22 +85,30 @@ clear_all() {
 apply_raw_audio_only() {
     # 只整 UDP 音频端口（默认 47900）：整块网卡 root netem 会把 SSH/pscp 一起
     # 打掉，注入脚本自己断在半路，看起来像测试失败其实是控制通道断了。
+    #
+    # DIRECTION=both（默认）双向；up=只整 ingress（对端→本机，用于非对称用例）；
+    # down=只整 egress（本机→对端）。
+    local dir="${DIRECTION:-both}"
     local port="${AUDIO_PORT:-47900}"
-    tc qdisc add dev "$IFACE" root handle 1: prio
-    tc qdisc add dev "$IFACE" parent 1:3 handle 30: netem $PARAMS
-    tc filter add dev "$IFACE" parent 1: protocol ip prio 1 u32 \
-        match ip protocol 17 0xff \
-        match ip dport "$port" 0xffff flowid 1:3
-    modprobe ifb 2>/dev/null || true
-    ip link show "$IFB" >/dev/null 2>&1 || ip link add "$IFB" type ifb
-    ip link set "$IFB" up
-    tc qdisc add dev "$IFACE" handle ffff: ingress
-    tc filter add dev "$IFACE" parent ffff: protocol ip u32 \
-        match ip protocol 17 0xff \
-        match ip sport "$port" 0xffff \
-        action mirred egress redirect dev "$IFB"
-    tc qdisc add dev "$IFB" root netem $PARAMS
-    echo "netem: applied '$PARAMS' to udp/$port on $IFACE (both directions, control traffic untouched)"
+    if [ "$dir" = "both" ] || [ "$dir" = "down" ]; then
+        tc qdisc add dev "$IFACE" root handle 1: prio
+        tc qdisc add dev "$IFACE" parent 1:3 handle 30: netem $PARAMS
+        tc filter add dev "$IFACE" parent 1: protocol ip prio 1 u32 \
+            match ip protocol 17 0xff \
+            match ip dport "$port" 0xffff flowid 1:3
+    fi
+    if [ "$dir" = "both" ] || [ "$dir" = "up" ]; then
+        modprobe ifb 2>/dev/null || true
+        ip link show "$IFB" >/dev/null 2>&1 || ip link add "$IFB" type ifb
+        ip link set "$IFB" up
+        tc qdisc add dev "$IFACE" handle ffff: ingress
+        tc filter add dev "$IFACE" parent ffff: protocol ip u32 \
+            match ip protocol 17 0xff \
+            match ip sport "$port" 0xffff \
+            action mirred egress redirect dev "$IFB"
+        tc qdisc add dev "$IFB" root netem $PARAMS
+    fi
+    echo "netem: applied '$PARAMS' to udp/$port on $IFACE (direction=$dir, control traffic untouched)"
 }
 
 case "$ACTION" in
@@ -113,9 +129,11 @@ case "$ACTION" in
         fi
         PARAMS="$(params_for "$PROFILE")"
         clear_all
-        if [ "$PROFILE" = "raw" ]; then
+        # AUDIO_ONLY=1：2h 计划的注入档也走"只整 udp/47900"的路径，
+        # 保证 SSH/控制面与 2h 编排不断线（DIRECTION 控制 up/down/both）。
+        if [ "$PROFILE" = "raw" ] || [ "${AUDIO_ONLY:-0}" = "1" ]; then
             if [ -z "$PARAMS" ]; then
-                echo "netem.sh: raw needs params, e.g. apply raw 'loss 30%'" >&2
+                echo "netem.sh: profile '$PROFILE' needs params (raw) or is unknown" >&2
                 exit 1
             fi
             apply_raw_audio_only

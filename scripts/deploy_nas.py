@@ -28,7 +28,7 @@ DAEMON_CMD = (
     "runuser -u kelierandes -- env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "
     "XDG_RUNTIME_DIR=/run/user/1000 setsid nohup /usr/local/bin/siren --log info web "
     "--listen 0.0.0.0:8090 --isolate pipewire --output-sink play_sink --autostart "
-    "--source loopback --name Linux-ISO --port 47900 >/tmp/siren-web.log 2>&1 &"
+    "--source tone --freq 440 --name Linux-ISO --port 47900 >/tmp/siren-web.log 2>&1 &"
 )
 
 
@@ -90,7 +90,7 @@ def main() -> int:
         f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "
         f"XDG_RUNTIME_DIR=/run/user/1000 setsid nohup /usr/local/bin/siren --log info web "
         f"--listen 0.0.0.0:8090 --isolate pipewire --output-sink play_sink --autostart "
-        f"--source loopback --name Linux-ISO --port 47900 >/tmp/siren-web.log 2>&1 & "
+        f"--source tone --freq 440 --name Linux-ISO --port 47900 >/tmp/siren-web.log 2>&1 & "
         f"sleep 3", timeout=120)
     out = ssh(args.host, args.password,
               "ps -C siren -o pid= | wc -l; siren --version", timeout=60)
