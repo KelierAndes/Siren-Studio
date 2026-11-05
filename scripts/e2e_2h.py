@@ -280,7 +280,11 @@ def digest(snap: dict) -> dict:
         "paths": sorted({str(s.get("path") or "?") for s in streams}),
         "streams": len(streams),
         "mix": [s.get("mix_count") for s in streams if int(s.get("stream_id") or 0) == 0xFFF0],
+        # 口径（2026-11-05 审计）：`underruns` 是 render 回调数——一次回调
+        # 缺 1 帧（20 µs）也计 1；真实听感量级看 `underrun_frames`（缺帧总
+        # 数；满块重预热时整块计入，故它大 = 真饥饿，≈0 = 全是毛刺）。
         "underruns": sum(int(s.get("underruns") or 0) for s in streams),
+        "underrun_frames": sum(int(s.get("underrun_frames") or 0) for s in streams),
         "trims": sum(int(s.get("buffer_resets") or 0) for s in streams),
         "lost": sum(int(s.get("lost_frames") or 0) for s in streams),
         "packets": sum(int(s.get("packets") or 0) for s in streams),
@@ -317,6 +321,7 @@ def delta(series: list[dict]) -> dict:
     lost = last["lost"] - first["lost"]
     return {
         "underruns": last["underruns"] - first["underruns"],
+        "underrun_frames": last["underrun_frames"] - first["underrun_frames"],
         "trims": last["trims"] - first["trims"],
         "lost": lost,
         "packets": packets,
