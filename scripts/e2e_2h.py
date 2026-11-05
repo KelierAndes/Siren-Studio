@@ -818,7 +818,8 @@ def p4_dualstack() -> None:
     case("B4", "P4", "flapping 迟滞", lambda _=None: skip("计划允许与 B2 合并观测；本轮未单列"))
     case("B5", "P4", "蓝牙掉线 5 s", b5)
     case("B6", "P4", "双断恢复顺序", lambda _=None: skip("需同时断两端入口；风险高于收益，本轮标 SKIP"))
-    case("B7", "P4", "MIX1 专项（纯蓝牙叶子 4 min）", _b7)
+    case("B7", "P4", "MIX1 专项（纯蓝牙叶子 4 min）", lambda _=None: skip(
+        "按用户要求暂停 NAS Wi-Fi/双网卡中断；MIX1 待改用不断网方案（见 out/2026-11-05_handover）"))
     case("B8", "P4", "hub 蓝牙故障转移", lambda _=None: skip("与 B9 同类；B9 已采拨号退避"))
     case("B9", "P4", "E3+W1 拨号/判死", b9)
     case("B10", "P4", "蓝牙+交叉流量", lambda _=None: skip("交叉流量未编排"))

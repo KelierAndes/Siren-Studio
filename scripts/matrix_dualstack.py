@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -256,27 +257,68 @@ def nas_wifi_state() -> str:
     return nas_sh("nmcli -t -f DEVICE,STATE device | grep -E 'enp1s0|wlp3s0'").strip()
 
 
+LAN_CUT_SCRIPT = """#!/bin/bash
+# NAS 与 LAN 彻底隔离：关掉**连接配置**的 autoconnect 后断开两个网口。
+# $1 = 自愈等待秒数（到点自动连回，避免脚本异常时把机器锁在离线状态）。
+set +e
+( setsid nohup /tmp/lan_heal.sh "${1:-240}" >/tmp/lan_heal.log 2>&1 & )
+: > /tmp/lan_cons
+for dev in enp1s0 wlp3s0; do
+    con=$(nmcli -g GENERAL.CONNECTION device show "$dev")
+    echo "$dev $con" >> /tmp/lan_cons
+    if [ -n "$con" ] && [ "$con" != "--" ]; then
+        nmcli connection modify "$con" connection.autoconnect no
+    fi
+done
+nmcli device disconnect wlp3s0
+nmcli device disconnect enp1s0
+"""
+
+LAN_HEAL_SCRIPT = """#!/bin/bash
+set +e
+sleep "${1:-0}"
+if [ -f /tmp/lan_cons ]; then
+    while read -r dev con; do
+        if [ -n "$con" ] && [ "$con" != "--" ]; then
+            nmcli connection modify "$con" connection.autoconnect yes
+        fi
+        nmcli device connect "$dev"
+    done < /tmp/lan_cons
+fi
+for dev in enp1s0 wlp3s0; do nmcli device set "$dev" autoconnect yes; done
+nmcli device connect enp1s0
+nmcli device connect wlp3s0
+"""
+
+
+def upload_lan_scripts() -> None:
+    for name, body in (("lan_cut.sh", LAN_CUT_SCRIPT), ("lan_heal.sh", LAN_HEAL_SCRIPT)):
+        payload = base64.b64encode(body.encode()).decode()
+        nas_sh(f"echo {payload} | base64 -d > /tmp/{name} && chmod +x /tmp/{name}")
+
+
 def nas_lan_cut(seconds: float) -> str:
     """把 NAS 与 LAN 彻底隔离：同时断 enp1s0(.196，默认路由/SSH) 与 wlp3s0(.159)。
 
-    只断 Wi-Fi 是空转（2026-11-05 实测 `ip route get 192.168.2.107` → `dev enp1s0`）。
-    断 enp1s0 会杀掉这条 SSH 会话，所以重连必须由先装好的脱离进程执行；本函数把
-    "会话死了"当成预期结果，不抛错。
+    只断 Wi-Fi 是空转（`ip route get 192.168.2.107` → `dev enp1s0`）。整段逻辑
+    必须放在一个以 root 运行的脚本里（复合命令里 sudo 只作用于第一条），并且要
+    改**连接配置**的 autoconnect——`nmcli device set ... autoconnect no` 挡不住
+    NetworkManager 在 disconnect 后立刻把 profile 重新拉起。
+    断开 enp1s0 会杀掉这条 SSH 会话，脚本里已预置自愈进程。
     """
     seconds = int(seconds)
-    heal = (f"sleep {seconds + 40}; nmcli device connect enp1s0; nmcli device connect wlp3s0")
-    cmd = (f"setsid nohup bash -c '{heal}' >/tmp/lan_selfheal.log 2>&1 </dev/null & "
-           f"sleep 1; nmcli device disconnect wlp3s0; nmcli device disconnect enp1s0")
+    upload_lan_scripts()
     try:
-        return nas_sudo_sh(cmd)
+        return nas_sudo_sh(f"bash /tmp/lan_cut.sh {seconds + 40}")
     except Exception as error:  # noqa: BLE001 - SSH 随 enp1s0 一起消失就是成功
         return f"session closed as expected: {type(error).__name__}"
 
 
 def nas_lan_restore() -> str:
     try:
-        return nas_sudo_sh("nmcli device connect enp1s0; nmcli device connect wlp3s0")
-    except Exception as error:  # noqa: BLE001 - 自愈计时器还在跑
+        upload_lan_scripts()
+        return nas_sudo_sh("bash /tmp/lan_heal.sh 0")
+    except Exception as error:  # noqa: BLE001 - 自愈脚本仍在跑
         return f"restore deferred to self-heal: {type(error).__name__}"
 
 
