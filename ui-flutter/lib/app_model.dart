@@ -190,6 +190,11 @@ class AppModel extends ChangeNotifier {
     _meshId = null;
     _leaveRequested = false;
     _faultReported = false;
+    // Drop the last snapshot too: keeping it left the 组网卡 rendering a
+    // dead engine's stale 「链路 已连 · 1 路」 while the pill correctly said
+    // 未组网 — the two panels disagreed about the same moment (2026-11-05
+    // phone session).
+    mesh = null;
   }
 
   void setStreamGain(int streamId, double gainDb) {

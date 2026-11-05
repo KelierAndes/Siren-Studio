@@ -62,6 +62,16 @@
 
 ## Phase 4 · 规模化与平台 ✅ 2026-11-05 核心落地
 
+## Phase 4.5 · 真机测试日遗留（2026-11-05）⬜
+
+| 任务 | 内容 | 落点 | 验收 | 状态 |
+| :-- | :-- | :-- | :-- | :-- |
+| W1 | 看门狗 tx 判据改进：半开 RFCOMM 的缓冲写（tx 7.8 KB/s）骗过"双向 <4 KB"判据，手机侧永不判死链路、不重拨。tx 项改为"对端确认的流量"（如 hb 经链路往返）或缩短纯 tx 判死窗 | `hybrid.rs` 链路看门狗 | E3 场景（hub BT 阻断）下手机 6 s 内判死并按退避重拨 | ⬜ |
+| W2 | 手机 UI 胶囊脱同步修复复验：引擎释放后清陈旧快照（`_finishLeave` 设 `mesh=null`）已落地，装机复验"胶囊与组网卡同一时刻一致" | `app_model.dart`、新 APK | join→leave→fault 三态切换时胶囊与卡片一致 | 🟨 修复落地待装机复验 |
+| W3 | F5 恢复路径长观察：netem rate 测试需要非 NAS 测试机（该机禁全双工限速，见 netem.sh 守卫）；在可用测试机上跑 degrade→restore 完整周期 ×10 | 换测试机 | 恢复触发率 100%、无振荡（退避生效） | ⬜ |
+| W4 | E5 三组对照实验（定位 A1）：手机侧 飞行模式只留 Wi-Fi / 关省电 / 都关，各 12 min，对比 EAGAIN+1.1 s 洞是否消失；手机 stats 增加 `tx_eagain`/roam/rssi/wakeup | `scripts/collect_1h.py`、手机设置（需人工参与） | 判定表产出；三项均无效则转固件/AP | ⬜ |
+| W5 | 手机 UI 状态胶囊数据源统一：胶囊读 `mesh.running`（FFI 启动流），组网卡读快照——引擎自愈/重启后两者可能脱同步；统一到快照派生 | `mobile_shell.dart`、`app_model.dart` | 自愈重入网后胶囊立即翻转 | ⬜ |
+
 - F5 ✅：`UdpSender::set_codec`（保 stream id+seq 中途换码）；发送循环按心跳 RTT P99 s16↔Opus48k 自适应（>400 ms 降级、健康 30 s 恢复）；Opus 编码器开 in-band FEC（预期丢包 15%，承接 E6 残余）。真机弱网复测待做。
 - F15 ✅：`GossipTable` + `GP01` 单播 gossip（每 5 s 全表广播，16 条目、30 s 有效期），mDNS 失效时网状自愈；与密码同路加密封送。
 - F16 ✅：mDNS TXT `proto=MESH_PROTO_VERSION(3)`；更高版本对端跳过 + 告警（旧版兼容）。
