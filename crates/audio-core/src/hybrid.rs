@@ -384,6 +384,13 @@ fn supervise(
     let mut last_quality_log = Instant::now();
     let mut last_quality_tx = 0u64;
     let mut last_quality_rx = 0u64;
+    // W1: hubs whose tunnel answered a keepalive probe (ka_rt moved). Once a
+    // hub is confirmed it keeps the probe even when it vanishes from mDNS —
+    // losing the proto TXT is exactly the failure the probe exists to catch,
+    // so the negotiation must not turn itself off at that moment. Reset when
+    // the hub identity changes or this node takes the hub role.
+    let mut ka_confirmed: std::collections::HashSet<u64> = std::collections::HashSet::new();
+    let mut last_ka_rt: u64 = 0;
     // TTL blacklist: a device that refused RFCOMM channel 16 is skipped for a
     // while so repeated inquiries walk further down the list instead of
     // retrying the same accessories forever.
@@ -1042,16 +1049,32 @@ fn supervise(
         let supports_keepalive = if acting_hub {
             !topology.is_empty() && topology.iter().all(|p| p.proto.unwrap_or(0) >= wanted)
         } else {
-            current_hub
+            let confirmed = current_hub
                 .as_ref()
-                .map(|hub| {
-                    topology
-                        .iter()
-                        .any(|p| p.uid == hub.uid && p.proto.unwrap_or(0) >= wanted)
-                })
-                .unwrap_or(false)
+                .map(|hub| ka_confirmed.contains(&hub.uid))
+                .unwrap_or(false);
+            confirmed
+                || current_hub
+                    .as_ref()
+                    .map(|hub| {
+                        topology
+                            .iter()
+                            .any(|p| p.uid == hub.uid && p.proto.unwrap_or(0) >= wanted)
+                    })
+                    .unwrap_or(false)
         };
         tunnel.set_keepalive(supports_keepalive);
+        // Latch the pong proof per hub, and drop it when that hub is replaced
+        // (an older relay would never pong) or when we become the hub.
+        if let Some(hub) = current_hub.as_ref() {
+            if stats.ka_rt > last_ka_rt {
+                ka_confirmed.insert(hub.uid);
+            }
+        }
+        if acting_hub || current_hub.is_none() {
+            ka_confirmed.clear();
+        }
+        last_ka_rt = stats.ka_rt;
         thread::sleep(Duration::from_millis(1000));
     }
     if let Some(listener) = shared.listener.lock().unwrap().take() {
