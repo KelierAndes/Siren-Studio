@@ -226,13 +226,36 @@ def nas_sudo(cmd: str) -> str:
 
 
 def netem(profile: str, direction: str = "both") -> str:
-    out = nas_sudo(
-        f"AUDIO_ONLY=1 DIRECTION={direction} bash $HOME/scripts/linux/netem.sh apply {profile}")
     # 未知档位时 netem.sh 只打印错误并以 1 退出；不检查的话用例会在干净网络上
-    # 跑完还判"通过"（上一轮 C6 就是这样拿到 lost=0 的）。
-    if "netem: applied" not in out:
-        raise RuntimeError(f"netem {profile} 未生效：{out.strip()[:200]}")
-    return out
+    # 跑完还判"通过"（上一轮 C6 就是这样拿到 lost=0 的）。SSH 偶发 abort 重试一次。
+    last = ""
+    for attempt in range(2):
+        try:
+            out = nas_sudo(
+                f"AUDIO_ONLY=1 DIRECTION={direction} "
+                f"bash $HOME/scripts/linux/netem.sh apply {profile}")
+        except Exception as error:  # noqa: BLE001
+            last = f"{type(error).__name__}: {error}"
+        else:
+            if "netem: applied" in out:
+                return out
+            last = out.strip()[:200]
+        if attempt == 0:
+            time.sleep(2)
+    raise RuntimeError(f"netem {profile} 未生效：{last}")
+
+
+def set_blackout(on: bool) -> None:
+    """整黑洞：用 iptables 静默丢掉 UDP/47900 双向。
+
+    netem 的 `loss 99–100%` 放在 egress 上会连带把这条 SSH 会话掐断
+    （2026-11-05 复现三次），iptables 不会。
+    """
+    action = "-A" if on else "-D"
+    # 必须一条命令一次 sudo：nas_sudo 里的 `echo pw | sudo -S <cmd>` 遇到分号时，
+    # 只有第一条在 root 下执行（2026-11-05 实测第二条 iptables 报权限不足）。
+    nas_sudo(f"/usr/sbin/iptables {action} INPUT -p udp --dport 47900 -j DROP || true")
+    nas_sudo(f"/usr/sbin/iptables {action} OUTPUT -p udp --dport 47900 -j DROP || true")
 
 
 def netem_clear() -> str:
@@ -542,6 +565,7 @@ def _c6():
         series = sample("C6", 60)
     finally:
         netem_clear()
+        set_blackout(False)
         nas_sudo("rfkill unblock bluetooth")
     d = delta(series)
     pct = d.get("loss_pct")
@@ -599,6 +623,45 @@ def _c7(_=None):
          "hub_sees": hub_sees, "own_stream": own_stream}
 
 
+def _reorder():
+    """W4 乱序：计划里的已知开放项（接收端没有重排容忍窗），记录数字不算回归。"""
+    netem("reorder")
+    series = sample("W4", 60)
+    netem_clear()
+    d = delta(series)
+    counts = phone_counts(phone_logcat("W4"))
+    return "KNOWN-OPEN", \
+        f"乱序+抖动（已知开放，对照 Phase 0 1278/407）：NAS {d}；手机 {counts}", \
+        {**d, **counts}
+
+
+def _spikes():
+    """W5：每 10 s 一次 0.3 s 的 150 ms 单向延迟尖峰。
+
+    原来的 `spike` 档是**恒定** 150 ms，配 30 ms 缓冲必然欠载——那是 W6 的
+    慢路径场景，不是"尖峰应被缓冲吸收"。
+    """
+    import f5_cycles as F5
+    sizes = F5.log_size()
+    series: list[dict] = []
+    started = time.time()
+    next_spike = 0.0
+    while time.time() - started < 60:
+        if time.time() - started >= next_spike:
+            netem("spike")
+            time.sleep(0.3)
+            netem_clear()
+            next_spike += 10
+        series += sample("W5_tick", 1.0, every=0.5)
+    inc = F5.read_since(sizes)
+    degraded = len(re.findall(r"degraded", inc.get("nas", "") + inc.get("pc", "")))
+    d = delta(series)
+    counts = phone_counts(phone_logcat("W5"))
+    return ("PASS" if degraded == 0 else "FAIL"), \
+        f"6 次 150 ms 尖峰（各 0.3 s）：F5 降级 {degraded} 次；NAS {d}；手机 {counts}", \
+        {"degraded": degraded, **d, **counts}
+
+
 def p3_wifi() -> None:
     """W1–W13：注入 → 采样 → 清除。数值型判定，缺能力的显式 SKIP。"""
     def inject(tag, profile, seconds, direction="both", note=""):
@@ -616,10 +679,8 @@ def p3_wifi() -> None:
     case("W1", "P3", "突发丢包 ge3 60 s", lambda _=None: inject("W1", "ge3", 60))
     case("W2", "P3", "随机丢包 5% 60 s", lambda _=None: inject("W2", "loss5", 60))
     case("W3", "P3", "黑洞 0.3 s ×3", lambda _=None: _blackouts())
-    case("W4", "P3", "乱序+抖动 60 s", lambda _=None: inject("W4", "reorder", 60,
-        note="已知开放（重排容忍），对照 Phase 0 1278/407"))
-    case("W5", "P3", "抖动尖峰 150 ms", lambda _=None: inject("W5", "spike", 60,
-        note="RTT≈300 ms 不应触发 F5"))
+    case("W4", "P3", "乱序+抖动 60 s", lambda _=None: _reorder())
+    case("W5", "P3", "抖动尖峰 150 ms", lambda _=None: _spikes())
     case("W6", "P3", "F5 完整周期", lambda _=None: _f5_cycle())
     case("W7", "P3", "重复+比特错（开密码）", lambda _=None: skip("三端开密码链路未编排（UI 输入未自动化）"))
     case("W8", "P3", "限速 1.2 Mbit", lambda _=None: skip("需非 NAS 测试机；netem.sh 守卫禁止全双工 rate"))
@@ -633,9 +694,9 @@ def p3_wifi() -> None:
 def _blackouts():
     before = digest(nas_snapshot())
     for _ in range(3):
-        netem("blackout")
+        set_blackout(True)
         time.sleep(0.3)
-        netem_clear()
+        set_blackout(False)
         time.sleep(2)
     after = digest(nas_snapshot())
     switches = len(SWITCH.findall(phone_logcat("W3")))
@@ -669,7 +730,7 @@ def nas_local_sampler_start(seconds: int = 320) -> None:
     B7 会把 NAS 的两个网口都断掉，届时从 PC 侧 HTTP 轮询必然失败（上一轮由此
     把"看不到"当成了"没有混音"）。这个循环在 NAS 内部读 localhost，断网照常。
     """
-    nas_sh(
+    nas(
         "rm -f /tmp/siren_local.jsonl; "
         "setsid nohup bash -c '"
         f"for i in $(seq {seconds}); do "
@@ -679,7 +740,7 @@ def nas_local_sampler_start(seconds: int = 320) -> None:
 
 
 def nas_local_sampler_fetch() -> list[dict]:
-    text = nas_sh("cat /tmp/siren_local.jsonl 2>/dev/null")
+    text = nas("cat /tmp/siren_local.jsonl 2>/dev/null")
     snaps = []
     for line in text.splitlines():
         line = line.strip()
@@ -695,6 +756,29 @@ def nas_local_sampler_fetch() -> list[dict]:
 def archive_nas_log() -> None:
     """daemon 重启会用 `>` 截断 /tmp/siren-web.log，重启前先留一份。"""
     nas("cp /tmp/siren-web.log /tmp/siren-web.before.log 2>/dev/null || true")
+
+
+def _b7(_=None):
+    # 纯蓝牙叶子：断手机 Wi-Fi + 断 NAS 两个口。断网期间由 NAS 本机采样，
+    # 否则从 PC 侧轮询只会拿到空快照（上一轮的 0/238 就是这样来的）。
+    adb("svc wifi disable")
+    nas_local_sampler_start(340)
+    try:
+        M.nas_lan_cut(260)
+        time.sleep(270)
+    finally:
+        M.nas_lan_restore()
+        adb("svc wifi enable")
+    snaps = nas_local_sampler_fetch()
+    rows = [digest(item.get("snapshot") or {}) for item in snaps]
+    bt_rows = [row for row in rows if "bt" in row["paths"]]
+    mix_rows = [row for row in rows if row["mix"]]
+    counts = phone_counts(phone_logcat("B7"))
+    # 场景没成立（NAS 还在 Wi-Fi 上）时不能把"没看到混音"当成 MIX1 结论。
+    status = "KNOWN-OPEN" if len(bt_rows) >= 30 else "FAIL"
+    return status, \
+        f"本机采样 {len(rows)} 次，其中 bt 载体 {len(bt_rows)}、混音到达 {len(mix_rows)}；手机 {counts}", \
+        {"samples": len(rows), "bt_rows": len(bt_rows), "mix_rows": len(mix_rows), **counts}
 
 
 def p4_dualstack() -> None:
@@ -718,27 +802,6 @@ def p4_dualstack() -> None:
         d = delta(series)
         return ("PASS" if d.get("silent_ms", 0) == 0 else "FAIL"), f"蓝牙掉 5 s：NAS {d}", d
 
-    def b7(_=None):
-        # 纯蓝牙叶子：断手机 Wi-Fi + 断 NAS 两个口。断网期间由 NAS 本机采样，
-        # 否则从 PC 侧轮询只会拿到空快照（上一轮的 0/238 就是这样来的）。
-        adb("svc wifi disable")
-        nas_local_sampler_start(340)
-        M.nas_lan_cut(260)
-        time.sleep(30)
-        time.sleep(240)
-        M.nas_lan_restore()
-        adb("svc wifi enable")
-        snaps = nas_local_sampler_fetch()
-        rows = [digest(item.get("snapshot") or {}) for item in snaps]
-        bt_rows = [row for row in rows if "bt" in row["paths"]]
-        mix_rows = [row for row in rows if row["mix"]]
-        counts = phone_counts(phone_logcat("B7"))
-        # 场景没成立（NAS 还在 Wi-Fi 上）时不能把"没看到混音"当成 MIX1 结论。
-        status = "KNOWN-OPEN" if len(bt_rows) >= 30 else "FAIL"
-        return status, \
-            f"本机采样 {len(rows)} 次，其中 bt 载体 {len(bt_rows)}、混音到达 {len(mix_rows)}；手机 {counts}", \
-            {"samples": len(rows), "bt_rows": len(bt_rows), "mix_rows": len(mix_rows), **counts}
-
     def b9(_=None):
         # hub 蓝牙阻断 60 s，数手机拨号次数
         adb("logcat -c")
@@ -755,7 +818,7 @@ def p4_dualstack() -> None:
     case("B4", "P4", "flapping 迟滞", lambda _=None: skip("计划允许与 B2 合并观测；本轮未单列"))
     case("B5", "P4", "蓝牙掉线 5 s", b5)
     case("B6", "P4", "双断恢复顺序", lambda _=None: skip("需同时断两端入口；风险高于收益，本轮标 SKIP"))
-    case("B7", "P4", "MIX1 专项（纯蓝牙叶子 4 min）", b7)
+    case("B7", "P4", "MIX1 专项（纯蓝牙叶子 4 min）", _b7)
     case("B8", "P4", "hub 蓝牙故障转移", lambda _=None: skip("与 B9 同类；B9 已采拨号退避"))
     case("B9", "P4", "E3+W1 拨号/判死", b9)
     case("B10", "P4", "蓝牙+交叉流量", lambda _=None: skip("交叉流量未编排"))
@@ -764,9 +827,15 @@ def p4_dualstack() -> None:
 def _soft_ladder():
     series_all = []
     for profile, secs in (("loss10", 5), ("blackout", 0.3), ("blackout", 1.0), ("blackout", 3.0)):
-        netem(profile)
+        if profile == "blackout":
+            set_blackout(True)
+        else:
+            netem(profile)
         series_all += sample(f"B3_{profile}_{secs}", secs)
-        netem_clear()
+        if profile == "blackout":
+            set_blackout(False)
+        else:
+            netem_clear()
         series_all += sample(f"B3_after_{profile}_{secs}", 10)
     d = delta(series_all)
     return "KNOWN-OPEN", f"阶梯注入累计：{d}（判定依赖逐音检测，见 P8 离线）", d
@@ -860,9 +929,9 @@ def p6_faults() -> None:
         return ("PASS" if counts["gaps"] == 0 else "KNOWN-OPEN"), f"熄屏+Doze 1 min：{counts}", counts
 
     def f11(_=None):
-        nas_sudo("iptables -A INPUT -p udp --dport 5353 -j DROP")
+        nas_sudo("/usr/sbin/iptables -A INPUT -p udp --dport 5353 -j DROP")
         series = sample("F11", 90)
-        nas_sudo("iptables -D INPUT -p udp --dport 5353 -j DROP")
+        nas_sudo("/usr/sbin/iptables -D INPUT -p udp --dport 5353 -j DROP")
         peers = [len(nas_snapshot().get("peers") or []) for _ in range(3)]
         return ("PASS" if all(p > 0 for p in peers) else "KNOWN-OPEN"), \
             f"mDNS 屏蔽 90 s：恢复后 peers={peers}（gossip 自愈）", {"peers": peers}
@@ -874,9 +943,9 @@ def p6_faults() -> None:
                          if "Siren" in (p.get("name") or "")), None)
         if not phone_ip:
             return skip("hub 未看到手机，跳过单向阻断")
-        nas_sudo(f"iptables -A INPUT -s {phone_ip} -p udp --dport 47900 -j DROP")
+        nas_sudo(f"/usr/sbin/iptables -A INPUT -s {phone_ip} -p udp --dport 47900 -j DROP")
         time.sleep(20)
-        nas_sudo(f"iptables -D INPUT -s {phone_ip} -p udp --dport 47900 -j DROP")
+        nas_sudo(f"/usr/sbin/iptables -D INPUT -s {phone_ip} -p udp --dport 47900 -j DROP")
         return "KNOWN-OPEN", f"单向阻断 20 s 完成（{phone_ip}）；端点剔除/重发现需看 hub 日志", {"phone_ip": phone_ip}
 
     case("F1", "P6", "杀 hub 并重启", f1)
@@ -904,7 +973,7 @@ def p7_soak() -> None:
             if step % 90 == 1:
                 netem("ge3"); time.sleep(2); netem_clear()
             if step % 180 == 2:
-                netem("blackout"); time.sleep(2); netem_clear()
+                set_blackout(True); time.sleep(2); set_blackout(False)
             if step % 300 == 3:
                 adb("svc bluetooth disable"); time.sleep(5); adb("svc bluetooth enable")
             series += sample(f"SK_{step:02d}", 10, every=2)
@@ -983,6 +1052,7 @@ def main() -> int:
             PHASES[phase]()
     finally:
         netem_clear()
+        set_blackout(False)
         M.nas_lan_restore()
         adb("svc wifi enable")
         adb("svc bluetooth enable")
