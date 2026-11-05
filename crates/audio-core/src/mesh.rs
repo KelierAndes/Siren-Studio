@@ -465,8 +465,9 @@ impl MeshEngine {
                     bt: info.bt,
                     bt_channel: None,
                     // A pinned row carries no mDNS TXT, so the peer's version
-                    // is unknown: capability gates stay closed.
-                    proto: None,
+                    // is whatever the pin says (`?proto=`); capability gates
+                    // (keepalive, W1) stay closed without it.
+                    proto: info.proto,
                 }
             })
             .collect();
@@ -1572,13 +1573,16 @@ pub struct PinnedPeer {
     pub bit: Option<u8>,
     pub name: Option<String>,
     pub id: Option<String>,
+    pub proto: Option<u8>,
 }
 
 /// Parse a static peer spec: `ip:port`, optionally followed by `?`-params
 /// that stand in for the mDNS TXT records real discovery would deliver —
 /// `bt=<address>` and `id=<s>` make the peer take part in the Bluetooth hub
-/// election, `bit=<n>` and `name=<s>` enrich the topology. Unknown params
-/// are rejected so a typo cannot silently disable the overlay.
+/// election, `bit=<n>` and `name=<s>` enrich the topology, `proto=<n>` is
+/// the peer's mesh protocol version (W1: a pinned leaf needs it to enable
+/// the tunnel keepalive against that hub). Unknown params are rejected so a
+/// typo cannot silently disable the overlay.
 pub fn parse_pinned_peer(spec: &str) -> Result<PinnedPeer> {
     let (endpoint, params) = spec.split_once('?').unwrap_or((spec, ""));
     let mut peer = PinnedPeer {
@@ -1587,6 +1591,7 @@ pub fn parse_pinned_peer(spec: &str) -> Result<PinnedPeer> {
         bit: None,
         name: None,
         id: None,
+        proto: None,
     };
     for pair in params.split('&').filter(|p| !p.is_empty()) {
         let (key, value) = pair.split_once('=').ok_or_else(|| {
@@ -1603,6 +1608,13 @@ pub fn parse_pinned_peer(spec: &str) -> Result<PinnedPeer> {
             }
             "name" => peer.name = Some(value.to_string()),
             "id" => peer.id = Some(value.to_string()),
+            "proto" => {
+                peer.proto = Some(value.parse().map_err(|_| {
+                    CoreError::InvalidArgument(format!(
+                        "bad proto '{value}' in '{spec}'"
+                    ))
+                })?)
+            }
             other => {
                 return Err(CoreError::InvalidArgument(format!(
                     "unknown pinned peer param '{other}' in '{spec}'"
@@ -1715,6 +1727,21 @@ mod tests {
             snapshot.iter().map(|p| &p.name).collect::<Vec<_>>()
         );
         assert!(snapshot.iter().all(|p| p.name != "gossip"));
+    }
+
+    #[test]
+    fn pinned_peer_parses_proto_hint() {
+        // W1: a statically pinned hub must be able to advertise its mesh
+        // protocol version so a pure-BT leaf enables the tunnel keepalive.
+        let peer = parse_pinned_peer("127.0.0.1:47900?id=aaaaaaaaaaaa0001&bt=AA:BB&proto=4")
+            .expect("parse pinned peer");
+        assert_eq!(peer.addr, "127.0.0.1:47900".parse().unwrap());
+        assert_eq!(peer.id.as_deref(), Some("aaaaaaaaaaaa0001"));
+        assert_eq!(peer.bt.as_deref(), Some("AA:BB"));
+        assert_eq!(peer.proto, Some(4));
+        let plain = parse_pinned_peer("127.0.0.1:47900").expect("parse plain pinned peer");
+        assert_eq!(plain.proto, None);
+        assert!(parse_pinned_peer("127.0.0.1:47900?proto=x").is_err());
     }
 
     #[test]
