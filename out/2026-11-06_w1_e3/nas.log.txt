@@ -1,0 +1,30 @@
+[2026-11-05T17:12:18.192Z INFO  audio_core::bt] bt: duplicate link 4 for origin 72a176cebfe88db4 closed
+[2026-11-05T17:12:18.192Z INFO  audio_core::bt] bt: duplicate link 3 for origin 72a176cebfe88db4 closed
+[2026-11-05T17:12:18.192Z INFO  audio_core::bt] bt: duplicate link 4 for origin 72a176cebfe88db4 closed
+[2026-11-05T17:12:18.192Z INFO  audio_core::bt] bt: duplicate link 3 for origin 72a176cebfe88db4 closed
+[2026-11-05T17:12:18.192Z INFO  audio_core::bt] bt: duplicate link 4 for origin 72a176cebfe88db4 closed
+[2026-11-05T17:12:18.192Z INFO  audio_core::bt] bt: duplicate link 3 for origin 72a176cebfe88db4 closed
+[2026-11-05T17:12:18.192Z INFO  audio_core::bt] bt: duplicate link 4 for origin 72a176cebfe88db4 closed
+[2026-11-05T17:12:18.192Z INFO  audio_core::bt] bt: duplicate link 3 for origin 72a176cebfe88db4 closed
+[2026-11-05T17:12:18.192Z INFO  audio_core::bt] bt: duplicate link 4 for origin 72a176cebfe88db4 closed
+[2026-11-05T17:12:18.192Z INFO  audio_core::bt] bt: duplicate link 3 for origin 72a176cebfe88db4 closed
+[2026-11-05T17:12:18.192Z INFO  audio_core::bt] bt: duplicate link 4 for origin 72a176cebfe88db4 closed
+[2026-11-05T17:12:18.192Z INFO  audio_core::bt] bt: duplicate link 3 for origin 72a176cebfe88db4 closed
+[2026-11-05T17:12:18.192Z INFO  audio_core::bt] bt: duplicate link 4 for origin 72a176cebfe88db4 closed
+[2026-11-05T17:12:18.194Z INFO  audio_core::bt] bt: link 4 reader ended (127.0.0.1:42809)
+[2026-11-05T17:12:20.192Z INFO  audio_core::hybrid] hybrid: hub accepted a link
+[2026-11-05T17:12:20.192Z INFO  audio_core::bt] bt: link 5 opened (127.0.0.1:41553)
+[2026-11-05T17:12:20.213Z INFO  audio_core::hybrid] bt: link quality: 1 link(s), tx 0.0 KB/s, rx 0.9 KB/s, write drops 0, gap p50 10 p90 25 p99 25 max 59884 ms, stalls >500 ms: 1 (35669 samples)
+[2026-11-05T17:12:22.417Z INFO  audio_core::mesh] mesh: tx level -15.1 dB (1 Wi-Fi link(s), 68534 packet(s))
+[2026-11-05T17:12:27.417Z INFO  audio_core::mesh] mesh: tx level -15.1 dB (1 Wi-Fi link(s), 69534 packet(s))
+[2026-11-05T17:12:30.214Z INFO  audio_core::hybrid] bt: link quality: 1 link(s), tx 0.0 KB/s, rx 7.0 KB/s, write drops 0, gap p50 10 p90 25 p99 25 max 59884 ms, stalls >500 ms: 1 (35669 samples)
+[2026-11-05T17:12:32.417Z INFO  audio_core::mesh] mesh: tx level -15.1 dB (1 Wi-Fi link(s), 70534 packet(s))
+[2026-11-05T17:12:37.417Z INFO  audio_core::mesh] mesh: tx level -15.1 dB (1 Wi-Fi link(s), 71534 packet(s))
+[2026-11-05T17:12:40.215Z INFO  audio_core::hybrid] bt: link quality: 1 link(s), tx 0.0 KB/s, rx 7.0 KB/s, write drops 0, gap p50 10 p90 25 p99 25 max 59884 ms, stalls >500 ms: 1 (35669 samples)
+[2026-11-05T17:12:42.417Z INFO  audio_core::mesh] mesh: tx level -15.1 dB (1 Wi-Fi link(s), 72534 packet(s))
+[2026-11-05T17:12:47.417Z INFO  audio_core::mesh] mesh: tx level -15.1 dB (1 Wi-Fi link(s), 73534 packet(s))
+[2026-11-05T17:12:50.216Z INFO  audio_core::hybrid] bt: link quality: 1 link(s), tx 0.0 KB/s, rx 7.0 KB/s, write drops 0, gap p50 10 p90 25 p99 25 max 59884 ms, stalls >500 ms: 1 (35669 samples)
+[2026-11-05T17:12:52.417Z INFO  audio_core::mesh] mesh: tx level -15.1 dB (1 Wi-Fi link(s), 74534 packet(s))
+[2026-11-05T17:12:57.417Z INFO  audio_core::mesh] mesh: tx level -15.1 dB (1 Wi-Fi link(s), 75534 packet(s))
+[2026-11-05T17:13:00.217Z INFO  audio_core::hybrid] bt: link quality: 1 link(s), tx 0.0 KB/s, rx 7.0 KB/s, write drops 0, gap p50 10 p90 25 p99 25 max 59884 ms, stalls >500 ms: 1 (35669 samples)
+[2026-11-05T17:13:02.417Z INFO  audio_core::mesh] mesh: tx level -15.1 dB (1 Wi-Fi link(s), 76534 packet(s))

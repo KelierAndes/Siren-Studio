@@ -66,7 +66,7 @@
 
 | 任务 | 内容 | 落点 | 验收 | 状态 |
 | :-- | :-- | :-- | :-- | :-- |
-| W1 | 看门狗 tx 判据改进：半开 RFCOMM 的缓冲写（tx 7.8 KB/s）骗过"双向 <4 KB"判据，手机侧永不判死链路、不重拨。tx 项改为"对端确认的流量"（如 hb 经链路往返）或缩短纯 tx 判死窗 | `hybrid.rs` 链路看门狗 | **sim 验收完成（2026-11-06，`tests/w1_halfopen.rs`）**：TCP 代理模拟真半开（leaf→hub 永续转发、hub→leaf 读后丢弃——TCP 持续 ACK，与真 RFCOMM 阻断字节级同构）。结果：keepalive 在静默 2 s 后探针、3 s 无应答判死（ka_dead++），leaf 拆链重拨、新一轮半开再次自愈——全程无需外部干预，6 s 字节窗确实被骗过（BT 上行 >4 KB）而 keepalive 兜住。配套修 `parse_pinned_peer` 支持 `?proto=`（静态 pin 的叶子此前永远开不了 keepalive）。剩：真机 E3 场景复测（需手机）。注：#38 其余部分已在 ed4f77a 关闭 | 🟨 sim 验收 ✅，真机待测 |
+| W1 | 看门狗 tx 判据改进：半开 RFCOMM 的缓冲写（tx 7.8 KB/s）骗过"双向 <4 KB"判据，手机侧永不判死链路、不重拨。tx 项改为"对端确认的流量"（如 hb 经链路往返）或缩短纯 tx 判死窗 | `hybrid.rs` 链路看门狗 | **双通道关闭（2026-11-06）**。sim：`tests/w1_halfopen.rs`（TCP 代理真半开，keepalive 判死+重拨+二轮自愈，5/5）。真机：SIGSTOP hub 复刻 E3（`out/2026-11-06_w1_e3/`）——SIGSTOP 后 **3.7 s** 判死（原判据 ≤6 s），keepalive 全程保持，重拨循环自愈，SIGCONT 后 1.8 s 链路重开并稳定。真机测试暴露并修复两个真缺陷：① mDNS TXT 从不发布 `proto` → keepalive 在一切真机上永不协商（898b9a4）；② hub 掉出 mDNS 时 keepalive 协商自关——恰在最需要时（6b49876 pong 锁存）。注：#38 其余部分已在 ed4f77a 关闭 | ✅ 2026-11-06 |
 | W2 | 手机 UI 胶囊脱同步修复复验：引擎释放后清陈旧快照（`_finishLeave` 设 `mesh=null`）已落地，装机复验"胶囊与组网卡同一时刻一致" | `app_model.dart`、新 APK | bd3f39c 已装机复验：单次点击 join → 18 s 后胶囊与组网卡完全一致（组网中·2台 / 已连·1路 / 离开组网） | ✅ 2026-11-05 |
 | W3 | F5 恢复路径长观察：netem rate 测试需要非 NAS 测试机（该机禁全双工限速，见 netem.sh 守卫）；在可用测试机上跑 degrade→restore 完整周期 ×10 | 换测试机 | 恢复触发率 100%、无振荡（退避生效） | ⬜ |
 | W4 | E5 三组对照实验（定位 A1）：手机侧 飞行模式只留 Wi-Fi / 关省电 / 都关，各 12 min，对比 EAGAIN+1.1 s 洞是否消失；手机 stats 增加 `tx_eagain`/roam/rssi/wakeup | `scripts/collect_1h.py`、手机设置（需人工参与） | 判定表产出；三项均无效则转固件/AP | ⬜ |

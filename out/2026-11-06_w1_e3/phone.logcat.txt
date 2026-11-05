@@ -1,0 +1,212 @@
+--------- beginning of main
+11-06 01:11:17.940 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:11:20.968 27436 30675 I siren   : stream 1340590776188811572 (Origin(9470023032744917534, 60535)) frozen after 3.0 s silence
+11-06 01:11:21.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 73598 packet(s))
+11-06 01:11:21.735 27436 30688 W siren   : bt: link 1 keepalive unanswered for 3000 ms, closed (half-open RFCOMM)
+11-06 01:11:21.735 27436 30748 I siren   : bt: link 1 writer failed (127.0.0.1:47980)
+11-06 01:11:21.735 27436 30747 I siren   : bt: link 1 reader ended (127.0.0.1:47980)
+11-06 01:11:22.692 27436 30749 W siren   : bt: pump ended: bt socket closed, read return: -1
+11-06 01:11:22.696 27436 31555 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:11:22.702 27436 31555 W siren   : bt: channel connect failed (read failed, socket might closed or timeout, read ret: -1), trying SPP
+11-06 01:11:22.757 27436 31555 E siren   : bt: dial failed
+11-06 01:11:22.757 27436 31555 E siren   : java.io.IOException: read failed, socket might closed or timeout, read ret: -1
+11-06 01:11:22.757 27436 31555 E siren   : 	at android.bluetooth.BluetoothSocket.readAll(BluetoothSocket.java:1026)
+11-06 01:11:22.757 27436 31555 E siren   : 	at android.bluetooth.BluetoothSocket.readInt(BluetoothSocket.java:1040)
+11-06 01:11:22.757 27436 31555 E siren   : 	at android.bluetooth.BluetoothSocket.connect(BluetoothSocket.java:535)
+11-06 01:11:22.757 27436 31555 E siren   : 	at com.sirenstudio.siren_ui.MainActivity.startBtBridge(r8-map-id-ebcc1658497fafdff721808ab8ccb4ff0e222418d2cc781e56f98903f1591742:164)
+11-06 01:11:22.963 27436 31555 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:11:23.058 27436 31555 I siren   : bt: link 2 opened (127.0.0.1:47980)
+11-06 01:11:23.060 27436 31556 I siren   : bt: bridge up on 127.0.0.1:47980
+11-06 01:11:24.635 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 41 %)
+11-06 01:11:24.636 27436 30683 I siren   : mesh: 836c47c621873a1e degraded (rtt p99 11 ms, hb loss 41 %) — switching to Opus 48000
+11-06 01:11:26.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 75598 packet(s))
+11-06 01:11:26.691 27436 30689 I siren   : bt: link quality: 1 link(s), tx 6.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:11:28.271 27436 30688 W siren   : bt: link 2 keepalive unanswered for 3000 ms, closed (half-open RFCOMM)
+11-06 01:11:28.271 27436 31557 I siren   : bt: link 2 reader ended (127.0.0.1:47980)
+11-06 01:11:28.696 27436 31559 W siren   : bt: pump ended: bt socket closed, read return: -1
+11-06 01:11:28.700 27436 31581 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:11:28.704 27436 31581 W siren   : bt: channel connect failed (read failed, socket might closed or timeout, read ret: -1), trying SPP
+11-06 01:11:28.761 27436 31581 E siren   : bt: dial failed
+11-06 01:11:28.761 27436 31581 E siren   : java.io.IOException: read failed, socket might closed or timeout, read ret: -1
+11-06 01:11:28.761 27436 31581 E siren   : 	at android.bluetooth.BluetoothSocket.readAll(BluetoothSocket.java:1026)
+11-06 01:11:28.761 27436 31581 E siren   : 	at android.bluetooth.BluetoothSocket.readInt(BluetoothSocket.java:1040)
+11-06 01:11:28.761 27436 31581 E siren   : 	at android.bluetooth.BluetoothSocket.connect(BluetoothSocket.java:535)
+11-06 01:11:28.761 27436 31581 E siren   : 	at com.sirenstudio.siren_ui.MainActivity.startBtBridge(r8-map-id-ebcc1658497fafdff721808ab8ccb4ff0e222418d2cc781e56f98903f1591742:164)
+11-06 01:11:28.966 27436 31581 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:11:29.051 27436 31581 I siren   : bt: link 3 opened (127.0.0.1:47980)
+11-06 01:11:29.052 27436 31582 I siren   : bt: bridge up on 127.0.0.1:47980
+11-06 01:11:31.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 77598 packet(s))
+11-06 01:11:34.311 27436 30688 W siren   : bt: link 3 keepalive unanswered for 3000 ms, closed (half-open RFCOMM)
+11-06 01:11:34.311 27436 31583 I siren   : bt: link 3 reader ended (127.0.0.1:47980)
+11-06 01:11:34.696 27436 31585 W siren   : bt: pump ended: bt socket closed, read return: -1
+11-06 01:11:34.702 27436 31592 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:11:34.706 27436 31592 W siren   : bt: channel connect failed (read failed, socket might closed or timeout, read ret: -1), trying SPP
+11-06 01:11:34.767 27436 31592 E siren   : bt: dial failed
+11-06 01:11:34.767 27436 31592 E siren   : java.io.IOException: read failed, socket might closed or timeout, read ret: -1
+11-06 01:11:34.767 27436 31592 E siren   : 	at android.bluetooth.BluetoothSocket.readAll(BluetoothSocket.java:1026)
+11-06 01:11:34.767 27436 31592 E siren   : 	at android.bluetooth.BluetoothSocket.readInt(BluetoothSocket.java:1040)
+11-06 01:11:34.767 27436 31592 E siren   : 	at android.bluetooth.BluetoothSocket.connect(BluetoothSocket.java:535)
+11-06 01:11:34.767 27436 31592 E siren   : 	at com.sirenstudio.siren_ui.MainActivity.startBtBridge(r8-map-id-ebcc1658497fafdff721808ab8ccb4ff0e222418d2cc781e56f98903f1591742:164)
+11-06 01:11:34.974 27436 31592 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:11:35.069 27436 31592 I siren   : bt: link 4 opened (127.0.0.1:47980)
+11-06 01:11:35.071 27436 31593 I siren   : bt: bridge up on 127.0.0.1:47980
+11-06 01:11:36.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 79598 packet(s))
+11-06 01:11:36.694 27436 30689 I siren   : bt: link quality: 1 link(s), tx 6.6 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:11:40.336 27436 30688 W siren   : bt: link 4 keepalive unanswered for 3000 ms, closed (half-open RFCOMM)
+11-06 01:11:40.337 27436 31597 I siren   : bt: link 4 reader ended (127.0.0.1:47980)
+11-06 01:11:40.698 27436 31599 W siren   : bt: pump ended: bt socket closed, read return: -1
+11-06 01:11:40.702 27436 31612 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:11:40.706 27436 31612 W siren   : bt: channel connect failed (read failed, socket might closed or timeout, read ret: -1), trying SPP
+11-06 01:11:40.783 27436 31612 E siren   : bt: dial failed
+11-06 01:11:40.783 27436 31612 E siren   : java.io.IOException: read failed, socket might closed or timeout, read ret: -1
+11-06 01:11:40.783 27436 31612 E siren   : 	at android.bluetooth.BluetoothSocket.readAll(BluetoothSocket.java:1026)
+11-06 01:11:40.783 27436 31612 E siren   : 	at android.bluetooth.BluetoothSocket.readInt(BluetoothSocket.java:1040)
+11-06 01:11:40.783 27436 31612 E siren   : 	at android.bluetooth.BluetoothSocket.connect(BluetoothSocket.java:535)
+11-06 01:11:40.783 27436 31612 E siren   : 	at com.sirenstudio.siren_ui.MainActivity.startBtBridge(r8-map-id-ebcc1658497fafdff721808ab8ccb4ff0e222418d2cc781e56f98903f1591742:164)
+11-06 01:11:40.987 27436 31612 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:11:41.130 27436 31612 I siren   : bt: link 5 opened (127.0.0.1:47980)
+11-06 01:11:41.131 27436 31617 I siren   : bt: bridge up on 127.0.0.1:47980
+11-06 01:11:41.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 81598 packet(s))
+11-06 01:11:46.365 27436 30688 W siren   : bt: link 5 keepalive unanswered for 3000 ms, closed (half-open RFCOMM)
+11-06 01:11:46.366 27436 31618 I siren   : bt: link 5 reader ended (127.0.0.1:47980)
+11-06 01:11:46.632 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 83598 packet(s))
+11-06 01:11:46.699 27436 31620 W siren   : bt: pump ended: bt socket closed, read return: -1
+11-06 01:11:46.705 27436 31678 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:11:46.708 27436 31678 W siren   : bt: channel connect failed (read failed, socket might closed or timeout, read ret: -1), trying SPP
+11-06 01:11:46.783 27436 31678 E siren   : bt: dial failed
+11-06 01:11:46.783 27436 31678 E siren   : java.io.IOException: read failed, socket might closed or timeout, read ret: -1
+11-06 01:11:46.783 27436 31678 E siren   : 	at android.bluetooth.BluetoothSocket.readAll(BluetoothSocket.java:1026)
+11-06 01:11:46.783 27436 31678 E siren   : 	at android.bluetooth.BluetoothSocket.readInt(BluetoothSocket.java:1040)
+11-06 01:11:46.783 27436 31678 E siren   : 	at android.bluetooth.BluetoothSocket.connect(BluetoothSocket.java:535)
+11-06 01:11:46.783 27436 31678 E siren   : 	at com.sirenstudio.siren_ui.MainActivity.startBtBridge(r8-map-id-ebcc1658497fafdff721808ab8ccb4ff0e222418d2cc781e56f98903f1591742:164)
+11-06 01:11:46.987 27436 31678 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:11:47.085 27436 31678 I siren   : bt: link 6 opened (127.0.0.1:47980)
+11-06 01:11:47.086 27436 31680 I siren   : bt: bridge up on 127.0.0.1:47980
+11-06 01:11:47.696 27436 30689 I siren   : bt: link quality: 1 link(s), tx 6.7 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:11:48.000 27436 30675 I siren   : stream 1340590776188811572 (Origin(9470023032744917534, 60535)) evicted after freeze grace
+11-06 01:11:48.751 27436 30684 I siren   : mesh: peer 836c47c621873a1e left
+11-06 01:11:51.631 27436 30683 I siren   : mesh: tx level -15.1 dB (0 Wi-Fi link(s), 85022 packet(s))
+11-06 01:11:52.401 27436 30688 W siren   : bt: link 6 keepalive unanswered for 3000 ms, closed (half-open RFCOMM)
+11-06 01:11:52.401 27436 31681 I siren   : bt: link 6 reader ended (127.0.0.1:47980)
+11-06 01:11:52.700 27436 31683 W siren   : bt: pump ended: bt socket closed, read return: -1
+11-06 01:11:52.704 27436 31706 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:11:52.708 27436 31706 W siren   : bt: channel connect failed (read failed, socket might closed or timeout, read ret: -1), trying SPP
+11-06 01:11:52.811 27436 31706 E siren   : bt: dial failed
+11-06 01:11:52.811 27436 31706 E siren   : java.io.IOException: read failed, socket might closed or timeout, read ret: -1
+11-06 01:11:52.811 27436 31706 E siren   : 	at android.bluetooth.BluetoothSocket.readAll(BluetoothSocket.java:1026)
+11-06 01:11:52.811 27436 31706 E siren   : 	at android.bluetooth.BluetoothSocket.readInt(BluetoothSocket.java:1040)
+11-06 01:11:52.811 27436 31706 E siren   : 	at android.bluetooth.BluetoothSocket.connect(BluetoothSocket.java:535)
+11-06 01:11:52.811 27436 31706 E siren   : 	at com.sirenstudio.siren_ui.MainActivity.startBtBridge(r8-map-id-ebcc1658497fafdff721808ab8ccb4ff0e222418d2cc781e56f98903f1591742:164)
+11-06 01:11:53.014 27436 31706 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:11:53.128 27436 31706 I siren   : bt: link 7 opened (127.0.0.1:47980)
+11-06 01:11:53.129 27436 31710 I siren   : bt: bridge up on 127.0.0.1:47980
+11-06 01:11:56.630 27436 30683 I siren   : mesh: tx level -15.1 dB (0 Wi-Fi link(s), 86022 packet(s))
+11-06 01:11:57.698 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.2 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:11:58.443 27436 30688 W siren   : bt: link 7 keepalive unanswered for 3000 ms, closed (half-open RFCOMM)
+11-06 01:11:58.443 27436 31713 I siren   : bt: link 7 writer failed (127.0.0.1:47980)
+11-06 01:11:58.443 27436 31712 I siren   : bt: link 7 reader ended (127.0.0.1:47980)
+11-06 01:11:58.704 27436 31714 W siren   : bt: pump ended: bt socket closed, read return: -1
+11-06 01:11:58.708 27436 31732 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:11:58.711 27436 31732 W siren   : bt: channel connect failed (read failed, socket might closed or timeout, read ret: -1), trying SPP
+11-06 01:11:58.772 27436 31732 E siren   : bt: dial failed
+11-06 01:11:58.772 27436 31732 E siren   : java.io.IOException: read failed, socket might closed or timeout, read ret: -1
+11-06 01:11:58.772 27436 31732 E siren   : 	at android.bluetooth.BluetoothSocket.readAll(BluetoothSocket.java:1026)
+11-06 01:11:58.772 27436 31732 E siren   : 	at android.bluetooth.BluetoothSocket.readInt(BluetoothSocket.java:1040)
+11-06 01:11:58.772 27436 31732 E siren   : 	at android.bluetooth.BluetoothSocket.connect(BluetoothSocket.java:535)
+11-06 01:11:58.772 27436 31732 E siren   : 	at com.sirenstudio.siren_ui.MainActivity.startBtBridge(r8-map-id-ebcc1658497fafdff721808ab8ccb4ff0e222418d2cc781e56f98903f1591742:164)
+11-06 01:11:58.978 27436 31732 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:11:59.064 27436 31732 I siren   : bt: link 8 opened (127.0.0.1:47980)
+11-06 01:11:59.066 27436 31733 I siren   : bt: bridge up on 127.0.0.1:47980
+11-06 01:12:01.630 27436 30683 I siren   : mesh: tx level -15.1 dB (0 Wi-Fi link(s), 87022 packet(s))
+11-06 01:12:04.481 27436 30688 W siren   : bt: link 8 keepalive unanswered for 3000 ms, closed (half-open RFCOMM)
+11-06 01:12:04.482 27436 31734 I siren   : bt: link 8 reader ended (127.0.0.1:47980)
+11-06 01:12:04.703 27436 31736 W siren   : bt: pump ended: bt socket closed, read return: -1
+11-06 01:12:04.707 27436 31764 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:12:04.712 27436 31764 W siren   : bt: channel connect failed (read failed, socket might closed or timeout, read ret: -1), trying SPP
+11-06 01:12:04.841 27436 31764 E siren   : bt: dial failed
+11-06 01:12:04.841 27436 31764 E siren   : java.io.IOException: read failed, socket might closed or timeout, read ret: -1
+11-06 01:12:04.841 27436 31764 E siren   : 	at android.bluetooth.BluetoothSocket.readAll(BluetoothSocket.java:1026)
+11-06 01:12:04.841 27436 31764 E siren   : 	at android.bluetooth.BluetoothSocket.readInt(BluetoothSocket.java:1040)
+11-06 01:12:04.841 27436 31764 E siren   : 	at android.bluetooth.BluetoothSocket.connect(BluetoothSocket.java:535)
+11-06 01:12:04.841 27436 31764 E siren   : 	at com.sirenstudio.siren_ui.MainActivity.startBtBridge(r8-map-id-ebcc1658497fafdff721808ab8ccb4ff0e222418d2cc781e56f98903f1591742:164)
+11-06 01:12:05.045 27436 31764 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:12:05.150 27436 31764 I siren   : bt: link 9 opened (127.0.0.1:47980)
+11-06 01:12:05.152 27436 31765 I siren   : bt: bridge up on 127.0.0.1:47980
+11-06 01:12:06.630 27436 30683 I siren   : mesh: tx level -15.1 dB (0 Wi-Fi link(s), 88022 packet(s))
+11-06 01:12:07.701 27436 30689 I siren   : bt: link quality: 1 link(s), tx 6.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:12:10.515 27436 31767 I siren   : bt: link 9 writer failed (127.0.0.1:47980)
+11-06 01:12:10.515 27436 30688 W siren   : bt: link 9 keepalive unanswered for 3000 ms, closed (half-open RFCOMM)
+11-06 01:12:10.516 27436 31766 I siren   : bt: link 9 reader ended (127.0.0.1:47980)
+11-06 01:12:10.708 27436 31768 W siren   : bt: pump ended: bt socket closed, read return: -1
+11-06 01:12:10.714 27436 31797 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:12:10.718 27436 31797 W siren   : bt: channel connect failed (read failed, socket might closed or timeout, read ret: -1), trying SPP
+11-06 01:12:10.871 27436 31797 E siren   : bt: dial failed
+11-06 01:12:10.871 27436 31797 E siren   : java.io.IOException: read failed, socket might closed or timeout, read ret: -1
+11-06 01:12:10.871 27436 31797 E siren   : 	at android.bluetooth.BluetoothSocket.readAll(BluetoothSocket.java:1026)
+11-06 01:12:10.871 27436 31797 E siren   : 	at android.bluetooth.BluetoothSocket.readInt(BluetoothSocket.java:1040)
+11-06 01:12:10.871 27436 31797 E siren   : 	at android.bluetooth.BluetoothSocket.connect(BluetoothSocket.java:535)
+11-06 01:12:10.871 27436 31797 E siren   : 	at com.sirenstudio.siren_ui.MainActivity.startBtBridge(r8-map-id-ebcc1658497fafdff721808ab8ccb4ff0e222418d2cc781e56f98903f1591742:164)
+11-06 01:12:11.077 27436 31797 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:12:11.158 27436 31797 I siren   : bt: link 10 opened (127.0.0.1:47980)
+11-06 01:12:11.160 27436 31798 I siren   : bt: bridge up on 127.0.0.1:47980
+11-06 01:12:11.630 27436 30683 I siren   : mesh: tx level -15.1 dB (0 Wi-Fi link(s), 89022 packet(s))
+11-06 01:12:16.550 27436 30688 W siren   : bt: link 10 keepalive unanswered for 3000 ms, closed (half-open RFCOMM)
+11-06 01:12:16.551 27436 31800 I siren   : bt: link 10 writer failed (127.0.0.1:47980)
+11-06 01:12:16.551 27436 31799 I siren   : bt: link 10 reader ended (127.0.0.1:47980)
+11-06 01:12:16.631 27436 30683 I siren   : mesh: tx level -15.1 dB (0 Wi-Fi link(s), 90022 packet(s))
+11-06 01:12:16.706 27436 31801 W siren   : bt: pump ended: bt socket closed, read return: -1
+11-06 01:12:16.710 27436 31823 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:12:16.713 27436 31823 W siren   : bt: channel connect failed (read failed, socket might closed or timeout, read ret: -1), trying SPP
+11-06 01:12:16.834 27436 31823 E siren   : bt: dial failed
+11-06 01:12:16.834 27436 31823 E siren   : java.io.IOException: read failed, socket might closed or timeout, read ret: -1
+11-06 01:12:16.834 27436 31823 E siren   : 	at android.bluetooth.BluetoothSocket.readAll(BluetoothSocket.java:1026)
+11-06 01:12:16.834 27436 31823 E siren   : 	at android.bluetooth.BluetoothSocket.readInt(BluetoothSocket.java:1040)
+11-06 01:12:16.834 27436 31823 E siren   : 	at android.bluetooth.BluetoothSocket.connect(BluetoothSocket.java:535)
+11-06 01:12:16.834 27436 31823 E siren   : 	at com.sirenstudio.siren_ui.MainActivity.startBtBridge(r8-map-id-ebcc1658497fafdff721808ab8ccb4ff0e222418d2cc781e56f98903f1591742:164)
+11-06 01:12:17.039 27436 31823 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:12:17.206 27436 31823 I siren   : bt: link 11 opened (127.0.0.1:47980)
+11-06 01:12:17.207 27436 31827 I siren   : bt: bridge up on 127.0.0.1:47980
+11-06 01:12:17.703 27436 30689 I siren   : bt: link quality: 1 link(s), tx 6.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:12:17.821 27436 30675 I siren   : stream 1340590776188811572 from 192.168.2.196:40592 (raw, origin 836c47c621873a1e) joined
+11-06 01:12:17.821 27436 30675 I siren   : stream 1340590776188811572 first packet: RawF32 1920 B peak 0.2500 [18 79 16 3E 18 79 16 3E 31 4D 0A 3E 31 4D 0A 3E BD 57 FB 3D BD 57 FB 3D]
+11-06 01:12:17.826 27436 31830 W siren   : bt: pump ended: bt socket closed, read return: -1
+11-06 01:12:17.830 27436 31831 W siren   : bt: pump ended: Broken pipe
+11-06 01:12:17.832 27436 31828 I siren   : bt: link 11 reader ended (127.0.0.1:47980)
+11-06 01:12:17.928 27436 30678 I siren   : trace: zerorun point=mix run_ms=59859.0 streams=1
+11-06 01:12:19.569 27436 30684 I siren   : mesh: discovered 192.168.2.196:47900 (Linux-ISO (mesh)) bit Some(30) bt Some("58:FB:84:3A:F1:EB")
+11-06 01:12:19.571 27436 30683 I siren   : mesh: sending to Linux-ISO (mesh) (836c47c621873a1e)
+11-06 01:12:19.713 27436 31836 I siren   : bt: dialing 58:FB:84:3A:F1:EB channel 16
+11-06 01:12:19.795 27436 31836 I siren   : bt: link 12 opened (127.0.0.1:47980)
+11-06 01:12:19.796 27436 31837 I siren   : bt: bridge up on 127.0.0.1:47980
+11-06 01:12:21.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 91435 packet(s))
+11-06 01:12:22.374 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:12:22.823 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 181154 pkts 1003 lost 0 resets 0 underruns 0 buffer 79 ms target 100 rms -15.1 dB
+11-06 01:12:25.174 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:12:26.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 93435 packet(s))
+11-06 01:12:27.706 27436 30689 I siren   : bt: link quality: 1 link(s), tx 6.3 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:12:27.828 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 182155 pkts 2004 lost 0 resets 0 underruns 0 buffer 70 ms target 100 rms -15.1 dB
+11-06 01:12:30.780 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:12:31.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 95435 packet(s))
+11-06 01:12:32.834 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 183156 pkts 3005 lost 0 resets 0 underruns 0 buffer 81 ms target 100 rms -15.1 dB
+11-06 01:12:36.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 97435 packet(s))
+11-06 01:12:37.707 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:12:37.837 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 184157 pkts 4006 lost 0 resets 0 underruns 0 buffer 72 ms target 100 rms -15.2 dB
+11-06 01:12:41.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 99435 packet(s))
+11-06 01:12:41.984 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:12:42.838 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 185157 pkts 5006 lost 0 resets 0 underruns 0 buffer 86 ms target 100 rms -15.1 dB
+11-06 01:12:44.784 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:12:46.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 101435 packet(s))
+11-06 01:12:47.584 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:12:47.710 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:12:47.843 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 186158 pkts 6007 lost 0 resets 0 underruns 0 buffer 92 ms target 100 rms -15.0 dB
+11-06 01:12:49.821 27436 30688 I siren   : bt: link 11 never carried audio, closed
+11-06 01:12:50.389 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:12:51.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 103435 packet(s))
+11-06 01:12:52.843 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 187158 pkts 7007 lost 0 resets 0 underruns 0 buffer 81 ms target 100 rms -25.8 dB
+11-06 01:12:53.190 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:12:56.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 105435 packet(s))
+11-06 01:12:57.713 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:12:57.848 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 188159 pkts 8008 lost 0 resets 0 underruns 0 buffer 76 ms target 100 rms -15.1 dB
+11-06 01:13:01.594 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:13:01.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 107435 packet(s))
+11-06 01:13:02.851 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 189159 pkts 9008 lost 0 resets 0 underruns 0 buffer 84 ms target 100 rms -14.9 dB
