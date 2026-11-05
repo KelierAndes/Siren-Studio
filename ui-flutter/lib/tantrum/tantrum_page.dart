@@ -58,10 +58,16 @@ class _Desk extends StatelessWidget {
         children: [
           const DecoratedBox(
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [TantrumTokens.deskTop, TantrumTokens.deskBottom],
+              // 桌面：左上打光、四周压暗，机箱的投影才落得住
+              gradient: RadialGradient(
+                center: Alignment(-0.55, -0.75),
+                radius: 1.35,
+                colors: [
+                  TantrumTokens.deskBottom,
+                  TantrumTokens.deskTop,
+                  Color(0xFFB9C2CD),
+                ],
+                stops: [0.0, 0.55, 1.0],
               ),
             ),
           ),
@@ -149,7 +155,7 @@ class _Panel extends StatelessWidget {
           ),
         ),
         Positioned(
-          left: m.inset,
+          left: m.screenLeftX,
           top: m.bodyTop,
           width: m.screenWidth,
           height: m.bodyHeight,
@@ -158,24 +164,41 @@ class _Panel extends StatelessWidget {
                   m: m,
                   waveform: model.waveform,
                   title: '主输出',
-                  subtitle: '-12 dBFS',
+                  subtitle: '${model.outText} dBFS',
                 )
               : TantrumEqGraph(m: m, curve: model.eqCurve, spectrum: model.spectrum),
         ),
         Positioned(
-          left: m.inset + m.screenWidth + m.paneGap,
-          right: m.inset,
+          left: m.grilleLeftX,
           top: m.bodyTop,
+          width: m.grilleWidth,
           height: m.bodyHeight,
           child: model.advanced
               ? _FaderBank(m: m, model: model)
               : TantrumGrille(m: m, centerLabel: 'OUT'),
         ),
-        // 读数条左半：屏模式胶囊 + ADV（图1 里这一带是空的，控件按图2 补进来）
+        // 图1 两侧的 IN / OUT 电平柱
         Positioned(
-          left: m.inset,
+          left: m.meterLeftX,
+          top: m.bodyTop,
+          width: m.meterWidth,
+          height: m.bodyHeight,
+          child: TantrumLevelMeter(
+              m: m, label: 'IN', level: model.inLevel, text: model.inText),
+        ),
+        Positioned(
+          left: m.meterRightX,
+          top: m.bodyTop,
+          width: m.meterWidth,
+          height: m.bodyHeight,
+          child: TantrumLevelMeter(
+              m: m, label: 'OUT', level: model.outLevel, text: model.outText),
+        ),
+        // 读数条左半：屏模式胶囊 + ADV
+        Positioned(
+          left: m.meterLeftX,
           top: m.readoutTop,
-          width: m.screenWidth,
+          width: m.meterWidth + m.paneGap + m.screenWidth,
           height: m.readoutHeight,
           child: FittedBox(
             fit: BoxFit.scaleDown,
@@ -284,36 +307,11 @@ class _ControlRow extends StatelessWidget {
             children: [
               TantrumChevronPair(m: m, onUp: () => model.stepPreset(1), onDown: () => model.stepPreset(-1)),
               SizedBox(height: 5 * m.scale),
-              GestureDetector(
+              TantrumCapsule(
+                label: model.mixing ? '混音' : '直通',
+                raised: model.mixing,
+                m: m,
                 onTap: () => model.setMixing(!model.mixing),
-                child: Container(
-                  width: 52 * m.scale,
-                  height: 20 * m.scale,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: model.mixing
-                          ? [Colors.white, TantrumTokens.wellBottom]
-                          : [TantrumTokens.wellTop, TantrumTokens.wellBottom],
-                    ),
-                    borderRadius: BorderRadius.circular(5 * m.scale),
-                    border: Border.all(color: TantrumTokens.knobEdge, width: 1),
-                    boxShadow: [
-                      BoxShadow(
-                        color: TantrumTokens.knobShadow,
-                        blurRadius: 2.5 * m.scale,
-                        offset: Offset(0, 1.2 * m.scale),
-                      ),
-                    ],
-                  ),
-                  child: Text(
-                    model.mixing ? '混音' : '直通',
-                    style: TantrumTokens.caption(m.scale * 1.1,
-                        color: TantrumTokens.inkStrong),
-                  ),
-                ),
               ),
             ],
           ),
@@ -350,9 +348,24 @@ class _FaderBank extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
         borderRadius: BorderRadius.circular(7 * m.scale),
-        border: Border.all(color: TantrumTokens.knobEdge, width: 1),
+        gradient: LinearGradient(
+          begin: const Alignment(-0.3, -1),
+          end: const Alignment(0.3, 1),
+          colors: [Colors.white, TantrumTokens.panelBottom],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: TantrumTokens.castDark,
+            blurRadius: 5 * m.scale,
+            offset: Offset(1.4 * m.scale, 2.4 * m.scale),
+          ),
+          BoxShadow(
+            color: TantrumTokens.rimLight,
+            blurRadius: 3 * m.scale,
+            offset: Offset(-1 * m.scale, -1.2 * m.scale),
+          ),
+        ],
       ),
       padding: EdgeInsets.symmetric(vertical: 6 * m.scale),
       child: Row(

@@ -22,6 +22,10 @@ class TantrumModel extends ChangeNotifier {
   /// 中间那颗胶囊：true = 混音，false = 直通
   bool mixing = true;
 
+  /// 左右两条电平柱（0–1，对应 −48…0 dBFS）。接线前是占位读数。
+  double inLevel = 0.75;
+  double outLevel = 0.62;
+
   /// 预设名（占位）
   String preset = 'MELTDOWN';
   int presetIndex = 1;
@@ -48,6 +52,12 @@ class TantrumModel extends ChangeNotifier {
 
   String get outputGainText => _negativeOnly(outputGain);
   String get sendGainText => _negativeOnly(sendGain);
+
+  /// 电平柱下方那串 dBFS（图1 的 "-12.0" / "-6.0"）
+  static String dbText(double level) => (-48 + level * 48).toStringAsFixed(1);
+
+  String get inText => dbText(inLevel);
+  String get outText => dbText(outLevel);
 
   /// 读数条（占位数字，接线时换成快照值）
   List<TantrumStat> get stats => [
