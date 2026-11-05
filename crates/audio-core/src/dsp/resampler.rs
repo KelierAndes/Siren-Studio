@@ -155,15 +155,28 @@ impl DriftResampler {
             .unwrap_or(false);
         let trim_due = emergency || (!cooling && !still_flooding);
         if self.started && available as f64 > reset_threshold && trim_due {
-            // Drop the oldest audio down to the target. This only happens
-            // after a long stall; the alternative is minutes of added latency.
+            // Drop the oldest audio that is above the trim ceiling. This only
+            // happens after a long stall; the alternative is minutes of added
+            // latency.
+            //
+            // MIX1 (#64): the shave must stop *at the ceiling*, not at the
+            // target. Shaving 60 ms every 240 ms walked a 573 ms backlog down
+            // toward 250 ms, and the measured ~458 ms Bluetooth stall then
+            // drained the rest into digital silence: one 3-minute leaf window
+            // shed 13.56 s of audio to trims and printed 15.27 s of `mix`
+            // zero-runs. The level between target and ceiling is the cushion
+            // that survives an arrival stall, not waste.
             //
             // The trim must keep rendering: the old path returned here, and
             // because the mixer zeroes the output buffer first, every trim
             // cost a whole block of digital silence — measured as 15–195 ms
             // holes that no underrun, loss or overflow counter reported.
-            let target = self.target_frames as usize;
-            let excess_raw = available.saturating_sub(target);
+            let floor = if emergency {
+                self.target_frames as usize
+            } else {
+                reset_threshold as usize
+            };
+            let excess_raw = available.saturating_sub(floor);
             let excess = if emergency {
                 excess_raw
             } else {
@@ -479,8 +492,10 @@ mod tests {
 
     #[test]
     fn trims_are_rate_limited_and_stay_started() {
-        // E1/A4: one trim shaves at most 60 ms, trims are >= 200 ms apart,
-        // and the stream keeps rendering (no silent block, no re-warm).
+        // E1/A4: one trim shaves at most 60 ms, trims are >= 200 ms apart, and
+        // the stream keeps rendering (no silent block, no re-warm). The backlog
+        // stays under 4x the ceiling so this exercises the rate-limited path,
+        // not the emergency ring-protection path.
         let (mut producer, mut consumer) = rtrb::RingBuffer::new(SAMPLE_RATE as usize * CHANNELS);
         let mut resampler = DriftResampler::new(30.0);
         let mut out = vec![0.0f32; 240 * CHANNELS];
@@ -489,8 +504,17 @@ mod tests {
         let report = resampler.render(&mut consumer, 240, 1.0, &mut out);
         assert!(report.started && !report.buffer_reset);
 
-        let flood = vec![0.1f32; frames_for_ms(400.0) * CHANNELS];
+        let flood = vec![0.1f32; frames_for_ms(150.0) * CHANNELS];
         producer.push_entire_slice(&flood).unwrap();
+        // E1/A4: the block that *receives* the burst does not shave — the
+        // backlog is still growing, so waiting costs nothing and a shave there
+        // would only cut audio the sender has not finished delivering.
+        let report = resampler.render(&mut consumer, 240, 1.0, &mut out);
+        assert!(
+            !report.buffer_reset,
+            "trim defers while the backlog is still growing"
+        );
+
         let report = resampler.render(&mut consumer, 240, 1.0, &mut out);
         assert!(report.buffer_reset, "first trim fires above the ceiling");
         assert!(report.started, "trim must not re-warm the stream");
@@ -498,23 +522,38 @@ mod tests {
             report.peak > 0.05,
             "the trimmed block must still carry audio"
         );
+        assert!(
+            ms_for_frames(report.fill_frames as usize) <= 180.0 - 59.0,
+            "one trim shaves at most 60 ms: fill {}",
+            ms_for_frames(report.fill_frames as usize)
+        );
 
         // Cooldown: the next block must not trim again.
         let report = resampler.render(&mut consumer, 240, 1.0, &mut out);
         assert!(!report.buffer_reset, "200 ms cooldown must hold");
 
-        // Repeated trims (spaced out) bring the fill back to target without
-        // ever dropping more than ~60 ms + one block at once.
-        let target = frames_for_ms(30.0);
-        for _ in 0..24 {
+        // MIX1 (#64): repeated trims stop at the ceiling. The level between the
+        // ceiling and the target is the cushion that survives the next arrival
+        // stall; walking it down to the target is what produced 13.56 s of trims
+        // followed by 15.27 s of mix silence in one 3-minute Bluetooth window.
+        let ceiling_ms = fill_ceiling_ms(30.0);
+        let ceiling = frames_for_ms(ceiling_ms);
+        let mut shaves = 0;
+        for _ in 0..6 {
             std::thread::sleep(std::time::Duration::from_millis(210));
             let report = resampler.render(&mut consumer, 240, 1.0, &mut out);
-            if report.fill_frames <= (target + frames_for_ms(12.0)) as u32 {
-                assert!(report.peak > 0.05, "audio keeps flowing while trimming");
-                return;
+            if !report.buffer_reset {
+                continue;
             }
+            shaves += 1;
+            assert!(
+                report.fill_frames as f64 + 2.0 * 240.0 >= ceiling as f64,
+                "trim went below the ceiling {ceiling_ms:.0} ms: fill {}",
+                ms_for_frames(report.fill_frames as usize)
+            );
+            assert!(report.started && report.peak > 0.05, "audio keeps flowing");
         }
-        panic!("rate-limited trims never returned the fill to target");
+        assert!(shaves >= 1, "the backlog was still above the ceiling");
     }
 
     #[test]

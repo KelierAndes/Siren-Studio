@@ -40,7 +40,13 @@ pub const MIX_STREAM_ID: u16 = 0xFFF0;
 /// F16: mesh protocol version advertised in mDNS TXT (`proto`). Peers that
 /// advertise a HIGHER version are ignored (unknown frame formats); older
 /// peers are accepted for backward compatibility.
-pub const MESH_PROTO_VERSION: u8 = 3;
+/// 4 adds the Bluetooth tunnel keepalive (a ping/pong that must come back over
+/// the same RFCOMM link), which is only safe to speak to peers that know it:
+/// an older relay would inject the probe as a stray datagram and never answer,
+/// so the probe would look like a dead link and cause redial churn.
+pub const MESH_PROTO_VERSION: u8 = 4;
+/// Minimum `proto` that understands the tunnel keepalive.
+pub const BT_KEEPALIVE_PROTO: u8 = 4;
 /// Payload is fixed-size stereo f32.
 pub const RAW_FRAME_BYTES_PER_SAMPLE_FRAME: usize = SAMPLE_BYTES * CHANNELS;
 

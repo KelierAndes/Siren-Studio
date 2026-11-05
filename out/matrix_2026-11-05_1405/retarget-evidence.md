@@ -10,10 +10,13 @@
 | S4_tri_phone_wifi_off | 46 | 0 |
 | S5_tri_phone_nas_wifi_off | 4 | 1 |
 
-1338 的抖动全部是同一个键 `836c47c621873a1e`（NAS 的 node id）在 192.168.2.159（eth）与
-192.168.2.196（Wi-Fi）之间来回翻：双网卡机器的 mDNS 轮流返回两个 A 记录，而发现层每次都
-覆盖 peer.addr。日志里没有任何 `peer ... moved (from received audio)` 行，证明抖动不来自
-E4 的收包回填，而来自发现层。
+1338 的抖动全部是同一个键 `836c47c621873a1e`（NAS 的 node id）在 192.168.2.196 与 192.168.2.159
+之间来回翻。接口归属后来量清楚了（`ip route get 192.168.2.107` → `dev enp1s0 src 192.168.2.196`，
+`ip addr` → enp1s0=**.196** metric 100、wlp3s0=**.159** metric 600）：
+**.196 是网线口 enp1s0，.159 才是 Wi-Fi**。也就是说 mesh 流量一直走以太网，
+mDNS 在同一子网的两个接口上轮流返回 A 记录，而"断 NAS Wi-Fi"只切掉了次要接口，
+并没有把 NAS 与 LAN 隔离（这直接改了矩阵 S5 的语义，见下）。日志里没有任何
+`peer ... moved (from received audio)` 行，说明抖动不来自 E4 的收包回填，而来自发现层。
 
 1405 剩下的 2 次是真故障跟随，且落点为 Wi-Fi 地址：
 

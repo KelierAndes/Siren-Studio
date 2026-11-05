@@ -42,10 +42,14 @@ NAS = f"{harness.NAS_USER}@{harness.NAS_HOST}"
 PC_EXE = REPO / "ui-flutter/build/windows/x64/runner/Release/siren_ui.exe"
 PC_LOG = PC_EXE.parent / "siren_ui.log"
 DAEMON_CMD = (
+    # 测试形态必须给 Linux 节点真实音频：它是一台不放声音的机器，用 `--source loopback`
+    # 时 E2 会把整段静音上行抑制掉（capture_silent_frames == capture_frames、kbps≈0），
+    # 于是每一轮里 NAS 都不参与混音——面板/矩阵看到的"3 台"其实只有 2 路有声。
+    # （`siren web --source` 的产品默认仍是 loopback=内录本机声音；`siren mesh` 默认 tone。）
     "runuser -u kelierandes -- env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "
     "XDG_RUNTIME_DIR=/run/user/1000 setsid nohup /usr/local/bin/siren --log info web "
     "--listen 0.0.0.0:8090 --isolate pipewire --output-sink play_sink --autostart "
-    "--source loopback --name Linux-ISO --port 47900 >/tmp/siren-web.log 2>&1 &"
+    "--source tone --freq 440 --name Linux-ISO --port 47900 >/tmp/siren-web.log 2>&1 &"
 )
 
 SCENARIOS = [
@@ -53,8 +57,11 @@ SCENARIOS = [
     ("S2_pc_phone_wifi_off", "pair", "phone_wifi"),
     ("S3_tri_dual", "trio", None),
     ("S4_tri_phone_wifi_off", "trio", "phone_wifi"),
-    ("S5_tri_phone_nas_wifi_off", "trio", "phone_wifi+nas_wifi"),
+    # S5 旧语义只断 wlp3s0，而实测 NAS 的默认路由在 enp1s0(.196) 上，Wi-Fi(.159)
+    # 只是次要出口 —— 那样根本没把 NAS 与 LAN 隔离，等于空转。现在两个都断。
+    ("S5_tri_phone_nas_lan_off", "trio", "phone_wifi+nas_lan"),
 ]
+NAS_LAN_IFACES = ("enp1s0", "wlp3s0")
 
 SWITCH = re.compile(r"switch (\w+) -> (\w+)")
 GAP = re.compile(r"audible gap ([\d.]+) ms before this (\w+) packet")
@@ -102,7 +109,7 @@ def daemon_start() -> None:
         "runuser -u kelierandes -- env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "
         "XDG_RUNTIME_DIR=/run/user/1000 setsid nohup /usr/local/bin/siren --log info web "
         "--listen 0.0.0.0:8090 --isolate pipewire --output-sink play_sink --autostart "
-        "--source loopback --name Linux-ISO --port 47900 >/tmp/siren-web.log 2>&1 & sleep 4"
+        "--source tone --freq 440 --name Linux-ISO --port 47900 >/tmp/siren-web.log 2>&1 & sleep 4"
     )
     time.sleep(3)
 
@@ -138,6 +145,9 @@ def audio_graph_preflight() -> dict:
         "default_sink": default,
         "monitor_sink_id": monitor_sink,
         "play_sink_id": sinks.get("play_sink"),
+        # 测试形态是 tone（见 DAEMON_CMD），所以"发送侧有电平"是预期，不能当回环证据；
+        # 回环唯一可靠的判据是 mesh monitor 被路由进了正在被采集的那个 sink。
+        "expected_source": "tone",
         "sender_tx_rms_db": tx_db,
     }
 
@@ -177,13 +187,32 @@ def wifi_phone(on: bool) -> str:
     return harness.adb_shell(f"svc wifi {'enable' if on else 'disable'}")
 
 
-def wifi_nas(on: bool) -> str:
-    action = "connect" if on else "disconnect"
-    return nas_sudo_sh(f"nmcli device {action} wlp3s0")
-
-
 def nas_wifi_state() -> str:
-    return nas_sh("nmcli -t -f DEVICE,STATE device | grep wlp3s0").strip()
+    return nas_sh("nmcli -t -f DEVICE,STATE device | grep -E 'enp1s0|wlp3s0'").strip()
+
+
+def nas_lan_cut(seconds: float) -> str:
+    """把 NAS 与 LAN 彻底隔离：同时断 enp1s0(.196，默认路由/SSH) 与 wlp3s0(.159)。
+
+    只断 Wi-Fi 是空转（2026-11-05 实测 `ip route get 192.168.2.107` → `dev enp1s0`）。
+    断 enp1s0 会杀掉这条 SSH 会话，所以重连必须由先装好的脱离进程执行；本函数把
+    "会话死了"当成预期结果，不抛错。
+    """
+    seconds = int(seconds)
+    heal = (f"sleep {seconds + 40}; nmcli device connect enp1s0; nmcli device connect wlp3s0")
+    cmd = (f"setsid nohup bash -c '{heal}' >/tmp/lan_selfheal.log 2>&1 </dev/null & "
+           f"sleep 1; nmcli device disconnect wlp3s0; nmcli device disconnect enp1s0")
+    try:
+        return nas_sudo_sh(cmd)
+    except Exception as error:  # noqa: BLE001 - SSH 随 enp1s0 一起消失就是成功
+        return f"session closed as expected: {type(error).__name__}"
+
+
+def nas_lan_restore() -> str:
+    try:
+        return nas_sudo_sh("nmcli device connect enp1s0; nmcli device connect wlp3s0")
+    except Exception as error:  # noqa: BLE001 - 自愈计时器还在跑
+        return f"restore deferred to self-heal: {type(error).__name__}"
 
 
 # ------------------------------------------------------------------ 采样
@@ -345,6 +374,63 @@ def metrics_from_nas(path: Path) -> dict:
 # ------------------------------------------------------------------ 场景
 
 
+def nas_snapshot() -> dict | None:
+    try:
+        with urllib.request.urlopen(
+                f"http://{harness.NAS_HOST}:8090/api/status", timeout=2) as resp:
+            return json.loads(resp.read().decode("utf-8", "replace")).get("snapshot")
+    except Exception:  # noqa: BLE001 - 断链期间取不到状态本身就是观测点
+        return None
+
+
+def nas_bt_counters() -> dict:
+    snap = nas_snapshot() or {}
+    bt = snap.get("bt") or {}
+    return {"ka_rt": bt.get("ka_rt"), "ka_dead": bt.get("ka_dead")}
+
+
+def carrier_watch(seconds: float, directory: Path, before: dict | None) -> dict:
+    """恢复期采样：每 2 s 读一次 NAS 快照，把"对端 Wi-Fi 回来后多久入向载波变回
+    wifi"量成数字（F13/#68 的验收判据此前没人采过），同时留蓝牙保活的往返/判死增量。
+    """
+    rows = []
+    deadline = time.time() + seconds
+    first_wifi = None
+    while time.time() < deadline:
+        row = {"t": round(time.time() - (deadline - seconds), 1)}
+        snap = nas_snapshot()
+        if snap is None:
+            row["unreachable"] = True
+        else:
+            streams = (snap.get("center") or {}).get("streams") or []
+            row["paths"] = sorted({str(s.get("path") or "?") for s in streams})
+            row["mix"] = [
+                {"count": s.get("mix_count"), "path": s.get("path"),
+                 "buffer_ms": round(float(s.get("buffer_ms") or 0))}
+                for s in streams if int(s.get("stream_id") or 0) == 0xFFF0
+            ]
+            bt = snap.get("bt") or {}
+            row["links"] = bt.get("links")
+            row["ka_rt"] = bt.get("ka_rt")
+            row["ka_dead"] = bt.get("ka_dead")
+            if first_wifi is None and "wifi" in row["paths"]:
+                first_wifi = row["t"]
+        rows.append(row)
+        time.sleep(2)
+    (directory / "recovery.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n", encoding="utf-8")
+    end = rows[-1] if rows else {}
+    started = before or {}
+    return {
+        "samples": len(rows),
+        "first_wifi_at_s": first_wifi,
+        "paths_end": end.get("paths"),
+        "links_end": end.get("links"),
+        "ka_rt_delta": (end.get("ka_rt") or 0) - (started.get("ka_rt") or 0),
+        "ka_dead_delta": (end.get("ka_dead") or 0) - (started.get("ka_dead") or 0),
+    }
+
+
 def run_scenario(name: str, topology: str, fault: str | None, directory: Path,
                  fault_minutes: float, pc_offset: int) -> dict:
     directory.mkdir(parents=True, exist_ok=True)
@@ -364,11 +450,10 @@ def run_scenario(name: str, topology: str, fault: str | None, directory: Path,
         graph = audio_graph_preflight()
         (directory / "graph.json").write_text(json.dumps(graph, ensure_ascii=False, indent=2),
                                               encoding="utf-8")
-        loop = (graph.get("monitor_sink_id") not in (None, graph.get("play_sink_id"))
-                or (graph.get("sender_tx_rms_db") or -120) > -60)
+        loop = graph.get("monitor_sink_id") not in (None, graph.get("play_sink_id"))
         mark("graph", **graph)
         if loop:
-            mark("graph_invalid", reason="mesh monitor 没落在 play_sink，或发送侧已有信号")
+            mark("graph_invalid", reason="mesh monitor 没落在 play_sink，即自激回环")
             # 带回环继续跑只会产出看起来正常的假数据（上一轮就是这样白跑 3 分钟），
             # 所以直接停下，让 finally 把设备恢复回去。
             raise RuntimeError(
@@ -377,13 +462,18 @@ def run_scenario(name: str, topology: str, fault: str | None, directory: Path,
                 f"tx={graph.get('sender_tx_rms_db')} dBFS")
 
     mark("begin", topology=topology, fault=fault)
+    nas_log_from = None
     if fault:
         wifi_phone(False)
-        if fault == "phone_wifi+nas_wifi":
-            # 先武装自动恢复，再断：万一驱动进程死了，NAS 也会自己连回来
-            nas_sh("setsid nohup bash -c 'sleep %d; nmcli device connect wlp3s0' "
-                   ">/tmp/wifi_selfheal.log 2>&1 </dev/null &" % int(fault_minutes * 60 + 40))
-            wifi_nas(False)
+        if fault == "phone_wifi+nas_lan":
+            try:
+                nas_log_from = int(nas_sh(
+                    "stat -c %s /tmp/siren-web.log 2>/dev/null || echo 0").strip() or 0) + 1
+            except Exception:  # noqa: BLE001
+                nas_log_from = None
+            # 断 enp1s0 会连着杀掉这条 SSH，所以 self-heal 与两次 disconnect 装在
+            # 同一条脱离命令里，由 NAS 自己在窗口结束后接回来。
+            mark("fault_cut", detail=nas_lan_cut(fault_minutes * 60 + 20))
         mark("fault_on", detail=nas_wifi_state())
     time.sleep(20)
     harness.adb_shell("logcat -c")
@@ -397,15 +487,40 @@ def run_scenario(name: str, topology: str, fault: str | None, directory: Path,
     while time.time() - window_start < fault_minutes * 60:
         time.sleep(5)
     mark("window_end", seconds=round(time.time() - window_start, 1))
+    # 恢复期的蓝牙保活增量要有个起点，取故障窗口末尾的计数器。
+    recovery_baseline = nas_bt_counters()
     if poller:
         stop.set()
         poller.join(timeout=5)
     if fault:
-        if fault == "phone_wifi+nas_wifi":
-            wifi_nas(True)
+        if fault == "phone_wifi+nas_lan":
+            # 等 self-heal 把两个口接回来（窗口 + 40 s 武装延迟），不要硬连 SSH。
+            deadline = time.time() + 90
+            while time.time() < deadline:
+                try:
+                    if "connected" in nas_wifi_state():
+                        break
+                except Exception:  # noqa: BLE001 - 还没接回来就是继续等
+                    pass
+                time.sleep(5)
         wifi_phone(True)
         mark("fault_off", detail=nas_wifi_state())
+        # 恢复期不是"等 30 s 就完事"：这里逐 2 s 采一次载波与蓝牙保活，
+        # 量出对端 Wi-Fi 回来后多久入向变回 wifi（#68 的判据），
+        # 以及半开链路的判死/重拨是否由保活接手（W1）。
+        recovery = carrier_watch(60.0, directory, recovery_baseline)
+        mark("recovery", **recovery)
+        if nas_log_from is not None:
+            # 隔离期间 NAS 自己不可达，它这段日志是纯蓝牙路径的唯一证据。
+            try:
+                (directory / "nas.isolated.log").write_text(
+                    nas_sh(f"tail -c +{nas_log_from} /tmp/siren-web.log"), encoding="utf-8")
+            except Exception:  # noqa: BLE001 - 取不到就只留 PC/手机侧
+                pass
+        result_recovery = recovery
+    else:
         time.sleep(30)
+        result_recovery = None
     mark("end")
 
     result = {}
@@ -417,16 +532,18 @@ def run_scenario(name: str, topology: str, fault: str | None, directory: Path,
         encoding="utf-8", errors="replace"))
     if (directory / "nas.status.jsonl").exists():
         result["nas"] = metrics_from_nas(directory / "nas.status.jsonl")
+    if result_recovery:
+        result["recovery"] = result_recovery
     (directory / "metrics.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     return result, pc_offset
 
 
 def table(rows: list[tuple[str, dict]]) -> str:
-    head = ("| 场景 | 蓝牙链路 末/峰（手机 · PC · NAS） | 载波切换（手机 · PC）\n"
+    head = ("| 场景 | 蓝牙链路 末/峰（手机 · PC · NAS） | 保活往返/判死（NAS 恢复期增量） | 载波切换（手机 · PC）\n"
             "| 音频洞（手机）次/最长/合计 ms | 混音静音>100ms（手机 · PC） | 修剪（手机 · PC，最大丢弃 ms）\n"
-            "| NAS 欠载/丢帧/无声 增量 | 末水位 ms（NAS · 手机 · PC） |\n"
-            "| :-- | :-- | :-- | :-- | :-- | :-- | :-- | :-- |\n")
+            "| NAS 欠载/丢帧/无声 增量 | 末水位 ms（NAS · 手机 · PC） | 恢复期入向回到 wifi（s） |\n"
+            "| :-- | :-- | :-- | :-- | :-- | :-- | :-- | :-- | :-- |\n")
 
     def live(device: dict) -> str:
         return f"{device.get('bt_link_end', '-')}/{device.get('bt_link_peak', '-')}"
@@ -445,9 +562,12 @@ def table(rows: list[tuple[str, dict]]) -> str:
         nas_delta = (f"{nas.get('underruns_delta', '-')} / {nas.get('lost_frames_delta', '-')}"
                      f" / {nas.get('silent_ms_delta', '-')}")
         level = f"{nas.get('buffer_ms', '-')} · {phone.get('buffer_last_ms', '-')} · {pc.get('buffer_last_ms', '-')}"
+        rec = m.get("recovery", {})
+        keepalive = f"{rec.get('ka_rt_delta', '-')} · {rec.get('ka_dead_delta', '-')}"
+        wifi_back = rec.get("first_wifi_at_s", "-")
         out.append(
-            f"| {name} | {links} | {switches} | {gaps} | {mix_silence} | {trims} | "
-            f"{nas_delta} | {level} |\n"
+            f"| {name} | {links} | {keepalive} | {switches} | {gaps} | {mix_silence} | {trims} | "
+            f"{nas_delta} | {level} | {wifi_back} |\n"
         )
     return "".join(out)
 
@@ -499,8 +619,11 @@ def main() -> int:
             rows.append((name, result))
     finally:
         wifi_phone(True)
-        wifi_nas(True)
-        daemon_start()
+        nas_lan_restore()
+        try:
+            daemon_start()
+        except Exception as error:  # noqa: BLE001 - NAS 可能还在自愈，别把收尾也带崩
+            print(f"收尾时 daemon 重启失败（稍后手动确认）：{error}", flush=True)
         # 收尾必须把测试音源全部关掉：残留的 tone 发送端会让 Linux 内录里
         # 一直有 440 Hz，下一轮排查会被它带偏。
         harness.adb_shell(f"am force-stop {PHONE_PKG}")

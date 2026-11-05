@@ -143,6 +143,10 @@ pub struct TopologyPeer {
     pub bit: Option<u8>,
     pub bt: Option<String>,
     pub bt_channel: Option<u8>,
+    /// F16: the peer's advertised mesh protocol version (mDNS TXT `proto`).
+    /// Drives capability gates such as the Bluetooth tunnel keepalive.
+    #[serde(default)]
+    pub proto: Option<u8>,
 }
 
 /// State of the Bluetooth carrier. Wi-Fi is always on; this only describes
@@ -171,6 +175,13 @@ pub struct BtStatus {
     pub gap_max_ms: u32,
     pub gap_stalls_500ms: u32,
     pub rx_kb_per_s: f64,
+    /// Tunnel keepalive: completed round trips, and links closed because a probe
+    /// was never answered. This is the only Bluetooth liveness proof that a
+    /// half-open link cannot fake with buffered writes.
+    #[serde(default)]
+    pub ka_rt: u64,
+    #[serde(default)]
+    pub ka_dead: u64,
     pub last_error: Option<String>,
 }
 
@@ -194,6 +205,8 @@ impl Default for BtStatus {
             gap_max_ms: 0,
             gap_stalls_500ms: 0,
             rx_kb_per_s: 0.0,
+            ka_rt: 0,
+            ka_dead: 0,
             last_error: None,
         }
     }
@@ -451,6 +464,9 @@ impl MeshEngine {
                     bit: info.bit,
                     bt: info.bt,
                     bt_channel: None,
+                    // A pinned row carries no mDNS TXT, so the peer's version
+                    // is unknown: capability gates stay closed.
+                    proto: None,
                 }
             })
             .collect();
@@ -965,8 +981,8 @@ fn run_mesh_sender(
                 // 永远不重建发送端，包继续发往旧地址（实测 NAS 的 topology 里
                 // PC 已换成 .214，PC 却始终收不到 Linux 的一路流）。
                 //
-                // 但也不能每次抖动都跟着改绑：多网卡机器（NAS 的 eth .159 与
-                // Wi-Fi .196）的 mDNS 记录轮流给两个 A 记录，peer.addr 就来回翻，
+                // 但也不能每次抖动都跟着改绑：多网卡机器（NAS 的 enp1s0 是默认路由，
+                // wlp3s0 只是次要出口）的 mDNS 会轮流给两个 A 记录，peer.addr 就来回翻，
                 // 跟着翻等于每几秒重连一次 socket（3 分钟健康基线里量到 39 次）。
                 // 只有当前目标确实听不到心跳应答时，才换发送地址。
                 let health = sender.path_health();
@@ -1442,6 +1458,7 @@ fn run_discovery_loop(
                         bit,
                         bt,
                         bt_channel,
+                        proto: peer.proto,
                     });
                 }
                 seen_topology.sort_by(|a, b| a.id.cmp(&b.id));

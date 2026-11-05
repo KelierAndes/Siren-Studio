@@ -188,8 +188,94 @@ struct TunnelStats {
     dropped: AtomicU64,
     last_rx_us: AtomicU64,
     links: AtomicUsize,
+    /// Completed keepalive round trips / links closed for an unanswered ping.
+    ka_rt: AtomicU64,
+    ka_dead: AtomicU64,
     /// Last completed arrival-gap window, published by the relay thread.
     gap: Mutex<GapWindow>,
+}
+
+/// Tunnel keepalive payload: `SKP1` + kind + 4-byte nonce.
+const KEEPALIVE_MAGIC: [u8; 4] = *b"SKP1";
+const KA_PING: u8 = b'P';
+const KA_PONG: u8 = b'R';
+const KEEPALIVE_LEN: usize = 9;
+/// A link that has delivered nothing inbound for this long gets probed. A leaf's
+/// Bluetooth downlink is idle by design while its Wi-Fi is healthy, so silence
+/// alone says nothing — the answer does.
+const KEEPALIVE_PING_AFTER: Duration = Duration::from_secs(2);
+/// An unanswered probe means the writes are going into a kernel buffer that the
+/// peer stopped reading: the link is half-open and must be dropped so the
+/// supervisor re-dials.
+const KEEPALIVE_DEAD_AFTER: Duration = Duration::from_secs(3);
+
+fn keepalive_payload(kind: u8, nonce: u32) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(KEEPALIVE_LEN);
+    bytes.extend_from_slice(&KEEPALIVE_MAGIC);
+    bytes.push(kind);
+    bytes.extend_from_slice(&nonce.to_be_bytes());
+    bytes
+}
+
+fn parse_keepalive(payload: &[u8]) -> Option<(u8, u32)> {
+    if payload.len() != KEEPALIVE_LEN || payload[..4] != KEEPALIVE_MAGIC {
+        return None;
+    }
+    let nonce = u32::from_be_bytes(payload[5..KEEPALIVE_LEN].try_into().ok()?);
+    Some((payload[4], nonce))
+}
+
+/// Liveness of one link: inbound bytes answer for the peer, and a probe that
+/// goes unanswered proves the peer is no longer reading.
+#[derive(Debug, Default)]
+struct Liveness {
+    last_rx: Option<Instant>,
+    outstanding: Option<(u32, Instant)>,
+    next_nonce: u32,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum LivenessAction {
+    Idle,
+    Ping(u32),
+    Reset,
+}
+
+impl Liveness {
+    fn note_rx(&mut self, now: Instant) {
+        self.last_rx = Some(now);
+        self.outstanding = None;
+    }
+
+    fn note_pong(&mut self, nonce: u32, now: Instant) -> bool {
+        if self.outstanding.map(|(pending, _)| pending) != Some(nonce) {
+            return false;
+        }
+        self.outstanding = None;
+        self.last_rx = Some(now);
+        true
+    }
+
+    fn evaluate(&mut self, now: Instant) -> LivenessAction {
+        if let Some((_, sent)) = self.outstanding {
+            return if now.duration_since(sent) >= KEEPALIVE_DEAD_AFTER {
+                LivenessAction::Reset
+            } else {
+                LivenessAction::Idle
+            };
+        }
+        let silent = self
+            .last_rx
+            .map(|at| now.duration_since(at))
+            .unwrap_or(Duration::MAX);
+        if silent >= KEEPALIVE_PING_AFTER {
+            self.next_nonce = self.next_nonce.wrapping_add(1);
+            let nonce = self.next_nonce;
+            self.outstanding = Some((nonce, now));
+            return LivenessAction::Ping(nonce);
+        }
+        LivenessAction::Idle
+    }
 }
 
 /// Rolling arrival-gap window for the Bluetooth links.
@@ -275,6 +361,13 @@ pub struct TunnelStatsSnapshot {
     pub gap_stalls_500ms: u32,
     pub gap_kb_per_s: f64,
     pub gap_window_ms: u64,
+    /// Keepalive round trips completed, and links closed because a ping was
+    /// never answered. A half-open RFCOMM link keeps accepting writes (measured
+    /// 7.8 KB/s of traffic that never reached the peer), so these two counters
+    /// are the only proof of a live Bluetooth path when the downlink is idle
+    /// by design.
+    pub ka_rt: u64,
+    pub ka_dead: u64,
 }
 
 pub struct Tunnel {
@@ -289,6 +382,10 @@ pub struct Tunnel {
     threads: Mutex<Vec<JoinHandle<()>>>,
     /// Hub mode: only N-1 mixes go down the links, nothing is relayed.
     n1: Arc<AtomicBool>,
+    /// Speak the tunnel keepalive. Only safe once the peer advertises
+    /// `proto >= BT_KEEPALIVE_PROTO`: an older relay injects the probe into its
+    /// mesh port and never answers, which would look like a dead link.
+    keepalive: Arc<AtomicBool>,
 }
 
 impl Tunnel {
@@ -311,6 +408,13 @@ impl Tunnel {
 
     pub fn link_count(&self) -> usize {
         self.stats.links.load(Ordering::Relaxed)
+    }
+
+    /// Enable or disable the keepalive probe (see the field comment).
+    pub fn set_keepalive(&self, on: bool) {
+        if self.keepalive.swap(on, Ordering::Relaxed) != on {
+            log::info!("bt: tunnel keepalive {}", if on { "on" } else { "off" });
+        }
     }
 
     pub fn stats(&self) -> TunnelStatsSnapshot {
@@ -345,6 +449,8 @@ impl Tunnel {
             gap_stalls_500ms: gap.stalls_500ms(),
             gap_kb_per_s: gap.kb_per_s(),
             gap_window_ms: gap.elapsed_ms,
+            ka_rt: self.stats.ka_rt.load(Ordering::Relaxed),
+            ka_dead: self.stats.ka_dead.load(Ordering::Relaxed),
         }
     }
 
@@ -396,6 +502,7 @@ impl Tunnel {
 
         let stop = Arc::new(AtomicBool::new(false));
         let n1 = Arc::new(AtomicBool::new(false));
+        let keepalive = Arc::new(AtomicBool::new(false));
         let uid = Arc::new(AtomicU64::new(config.node_uid));
         let stats = Arc::new(TunnelStats::default());
         let links: Arc<Mutex<HashMap<usize, Box<dyn Link>>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -461,6 +568,7 @@ impl Tunnel {
         let relay_stats = stats.clone();
         let relay_links = links.clone();
         let relay_n1 = n1.clone();
+        let relay_keepalive = keepalive.clone();
         threads.push(
             thread::Builder::new()
                 .name("siren-bt-relay".into())
@@ -474,6 +582,9 @@ impl Tunnel {
                     let mut last_out: HashMap<usize, Instant> = HashMap::new();
                     let mut link_origins: HashMap<usize, (u64, Instant)> = HashMap::new();
                     let mut attached_at: HashMap<usize, Instant> = HashMap::new();
+                    // Per-link keepalive state; only consulted while keepalive is on.
+                    let mut liveness: HashMap<usize, Liveness> = HashMap::new();
+                    let mut last_ka_tick = Instant::now();
                     let mut window: u64 = 0;
                     let mut last_sweep = Instant::now();
                     // Arrival-gap gauge, published every sweep (5 s).
@@ -484,16 +595,82 @@ impl Tunnel {
                             Ok(Command::AddLink { id, writer }) => {
                                 writers.insert(id, LinkWriter::new(writer));
                                 attached_at.insert(id, Instant::now());
+                                // Fresh link: give it the silence window before the
+                                // first probe instead of pinging it in the same tick.
+                                liveness.insert(
+                                    id,
+                                    Liveness {
+                                        last_rx: Some(Instant::now()),
+                                        ..Default::default()
+                                    },
+                                );
                                 relay_stats.links.store(writers.len(), Ordering::Relaxed);
                             }
                             Ok(Command::CloseLink { id }) => {
                                 writers.remove(&id);
                                 attached_at.remove(&id);
                                 last_out.remove(&id);
+                                liveness.remove(&id);
                                 relay_stats.links.store(writers.len(), Ordering::Relaxed);
                             }
                             Err(mpsc::TryRecvError::Empty) => {}
                             Err(mpsc::TryRecvError::Disconnected) => break,
+                        }
+                        // Keepalive tick — before the event wait, because a silent
+                        // link is exactly the case that produces no events.
+                        // Writes into a half-open RFCOMM socket keep succeeding
+                        // (7.8 KB/s measured against a blocked peer), so a round
+                        // trip is the only proof the leaf has left, and a hub sends
+                        // nothing down a standby link by design — the byte counters
+                        // cannot say "alive" either way.
+                        if relay_keepalive.load(Ordering::Relaxed)
+                            && last_ka_tick.elapsed() >= Duration::from_millis(500)
+                        {
+                            last_ka_tick = Instant::now();
+                            let now = Instant::now();
+                            let mut probes: Vec<(usize, u32)> = Vec::new();
+                            let mut dead: Vec<usize> = Vec::new();
+                            for (id, state) in liveness.iter_mut() {
+                                if !writers.contains_key(id) {
+                                    continue;
+                                }
+                                match state.evaluate(now) {
+                                    LivenessAction::Ping(nonce) => probes.push((*id, nonce)),
+                                    LivenessAction::Reset => dead.push(*id),
+                                    LivenessAction::Idle => {}
+                                }
+                            }
+                            for (id, nonce) in probes {
+                                let ping = Envelope {
+                                    origin: origin_bit,
+                                    ttl,
+                                    hop: 0,
+                                    payload: keepalive_payload(KA_PING, nonce),
+                                }
+                                .encode_compact();
+                                if let Some(writer) = writers.get_mut(&id) {
+                                    writer.offer(ping);
+                                }
+                            }
+                            for id in dead {
+                                writers.remove(&id);
+                                liveness.remove(&id);
+                                link_origins.remove(&id);
+                                attached_at.remove(&id);
+                                last_out.remove(&id);
+                                arrivals.remove(&id);
+                                if let Some(link) = relay_links.lock().unwrap().remove(&id) {
+                                    link.shutdown_link();
+                                }
+                                relay_stats.ka_dead.fetch_add(1, Ordering::Relaxed);
+                                relay_stats
+                                    .links
+                                    .store(writers.len(), Ordering::Relaxed);
+                                log::warn!(
+                                    "bt: link {id} keepalive unanswered for {} ms, closed (half-open RFCOMM)",
+                                    KEEPALIVE_DEAD_AFTER.as_millis()
+                                );
+                            }
                         }
                         let event = match event_rx.recv_timeout(Duration::from_millis(20)) {
                             Ok(event) => event,
@@ -563,6 +740,7 @@ impl Tunnel {
                                 writers.remove(&id);
                                 link_origins.remove(&id);
                                 last_out.remove(&id);
+                                liveness.remove(&id);
                                 if let Some(link) = relay_links.lock().unwrap().remove(&id) {
                                     link.shutdown_link();
                                 }
@@ -570,6 +748,35 @@ impl Tunnel {
                             }
                             Event::Link(source, mut envelope) => {
                                 let arrived = Instant::now();
+                                // Keepalive never reaches the mesh port, the byte
+                                // counters or the dedupe window: it is tunnel
+                                // plumbing, and an identical probe every two seconds
+                                // would otherwise be dropped as a duplicate.
+                                if let Some((kind, nonce)) = parse_keepalive(&envelope.payload) {
+                                    let entry = liveness.entry(source).or_default();
+                                    match kind {
+                                        KA_PING => {
+                                            if let Some(writer) = writers.get_mut(&source) {
+                                                let pong = Envelope {
+                                                    origin: self_uid.load(Ordering::Relaxed),
+                                                    ttl,
+                                                    hop: 0,
+                                                    payload: keepalive_payload(KA_PONG, nonce),
+                                                }
+                                                .encode_compact();
+                                                writer.offer(pong);
+                                            }
+                                            entry.note_rx(arrived);
+                                        }
+                                        KA_PONG => {
+                                            if entry.note_pong(nonce, arrived) {
+                                                relay_stats.ka_rt.fetch_add(1, Ordering::Relaxed);
+                                            }
+                                        }
+                                        _ => entry.note_rx(arrived),
+                                    }
+                                    continue;
+                                }
                                 if let Some(previous) = arrivals.insert(source, arrived) {
                                     gauge.record(
                                         arrived.duration_since(previous),
@@ -763,6 +970,7 @@ impl Tunnel {
             events: event_tx,
             threads: Mutex::new(threads),
             n1,
+            keepalive,
         })
     }
 
@@ -1224,5 +1432,131 @@ mod tunnel_tests {
         assert_eq!(decoded.seq, 1);
         assert_eq!(decoded.origin, 0x1234);
         tunnel.stop();
+    }
+
+    /// A link that accepts every write and never delivers a read — the half-open
+    /// RFCOMM signature: the kernel buffer keeps taking audio while the peer has
+    /// stopped reading it.
+    #[derive(Clone)]
+    struct BlackHole {
+        alive: Arc<AtomicBool>,
+        written: Arc<AtomicUsize>,
+    }
+
+    impl Link for BlackHole {
+        fn read_link(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+            while self.alive.load(Ordering::Relaxed) {
+                thread::sleep(Duration::from_millis(50));
+            }
+            Err(std::io::Error::new(
+                ErrorKind::ConnectionReset,
+                "link shut down",
+            ))
+        }
+
+        fn write_link(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.written.fetch_add(buf.len(), Ordering::Relaxed);
+            Ok(buf.len())
+        }
+
+        fn try_clone_link(&self) -> std::io::Result<Box<dyn Link>> {
+            Ok(Box::new(self.clone()))
+        }
+
+        fn shutdown_link(&self) {
+            self.alive.store(false, Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn keepalive_payload_round_trips() {
+        let ping = keepalive_payload(KA_PING, 7);
+        assert_eq!(ping.len(), KEEPALIVE_LEN);
+        assert_eq!(parse_keepalive(&ping), Some((KA_PING, 7)));
+        // Audio frames must never be mistaken for a probe.
+        assert!(parse_keepalive(b"SR1234567890").is_none());
+        assert!(parse_keepalive(&[0u8; KEEPALIVE_LEN]).is_none());
+    }
+
+    #[test]
+    fn unanswered_probe_declares_the_link_dead() {
+        let started = Instant::now();
+        let mut state = Liveness::default();
+        state.note_rx(started);
+        assert_eq!(
+            state.evaluate(started + Duration::from_millis(500)),
+            LivenessAction::Idle,
+            "recent inbound traffic needs no probe"
+        );
+        assert_eq!(
+            state.evaluate(started + KEEPALIVE_PING_AFTER),
+            LivenessAction::Ping(1)
+        );
+        assert_eq!(
+            state.evaluate(started + KEEPALIVE_PING_AFTER + Duration::from_millis(500)),
+            LivenessAction::Idle,
+            "waiting for the answer is not yet death"
+        );
+        assert!(
+            !state.note_pong(99, started + KEEPALIVE_PING_AFTER + Duration::from_millis(900)),
+            "a wrong nonce must not revive the link"
+        );
+        assert_eq!(
+            state.evaluate(started + KEEPALIVE_PING_AFTER + KEEPALIVE_DEAD_AFTER),
+            LivenessAction::Reset
+        );
+
+        let mut answered = Liveness {
+            last_rx: Some(started),
+            outstanding: Some((1, started + KEEPALIVE_PING_AFTER)),
+            next_nonce: 1,
+        };
+        assert!(answered.note_pong(1, started + KEEPALIVE_PING_AFTER + Duration::from_millis(200)));
+        assert_eq!(
+            answered.evaluate(started + KEEPALIVE_PING_AFTER + Duration::from_millis(900)),
+            LivenessAction::Idle,
+            "an answered probe buys the link another silence window"
+        );
+    }
+
+    #[test]
+    fn half_open_link_is_dropped_by_the_keepalive() {
+        // W1: writes into a half-open link keep succeeding (7.8 KB/s measured
+        // against a blocked peer), so the byte-window watchdog in `hybrid.rs`
+        // cannot see this state. A probe that has to come back over the same link
+        // can, and the supervisor re-dials once the link count reaches zero.
+        let link = BlackHole {
+            alive: Arc::new(AtomicBool::new(true)),
+            written: Arc::new(AtomicUsize::new(0)),
+        };
+        let tunnel = Tunnel::start(TunnelConfig {
+            mesh_bind: "127.0.0.1:1".parse().unwrap(),
+            node_bit: 1,
+            node_uid: 0xABCD,
+            ttl: 5,
+            links: vec![Box::new(link.clone())],
+        })
+        .expect("tunnel");
+        // The relay registers the link on its own tick, so wait for it instead of
+        // asserting on a race.
+        let attached = Instant::now() + Duration::from_secs(2);
+        while tunnel.link_count() == 0 && Instant::now() < attached {
+            thread::sleep(Duration::from_millis(50));
+        }
+        assert_eq!(tunnel.link_count(), 1, "the link is up before it goes half-open");
+        tunnel.set_keepalive(true);
+
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while Instant::now() < deadline && tunnel.link_count() > 0 {
+            thread::sleep(Duration::from_millis(100));
+        }
+        let stats = tunnel.stats();
+        tunnel.stop();
+        assert_eq!(stats.ka_dead, 1, "the unanswered probe must close the link");
+        assert_eq!(stats.links, 0, "no live link is left to keep");
+        assert!(
+            link.written.load(Ordering::Relaxed) > 0,
+            "the probe was written and swallowed: writes alone prove nothing"
+        );
     }
 }

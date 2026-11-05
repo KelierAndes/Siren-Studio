@@ -274,9 +274,10 @@ pub struct StreamSnapshot {
     pub peak_hold_db: f64,
     pub buffer_ms: f64,
     pub target_ms: f64,
-    /// Overflow-trim ceiling: above this the mixer drops the oldest audio to
-    /// pull latency back to target. Shown next to `buffer_ms` so a panel can
-    /// tell "about to be trimmed" from "starving".
+    /// Overflow-trim ceiling: above this the mixer drops the oldest audio, and
+    /// the shave stops here (not at `target_ms`) because the level between the
+    /// two is the cushion that survives an arrival stall. Shown next to
+    /// `buffer_ms` so a panel can tell "about to be trimmed" from "starving".
     pub buffer_max_ms: f64,
     pub ratio: f64,
     pub underruns: u32,

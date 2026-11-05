@@ -57,10 +57,15 @@ def mark(phase: str, action: str, **extra) -> None:
 
 
 def nas(cmd: str, timeout: int = 120) -> str:
+    # 必须显式 utf-8：Windows 上 text=True 会按本地 GBK 解码，NAS 日志里的非 ASCII
+    # （例如 mesh.rs 的 "recovered — restoring"，U+2014）会被换成 U+FFFD，
+    # 于是按原文写的正则永远匹配不上——观测被当成产品故障（2026-11-05 就是这样
+    # 误判 F5 "恢复 0/3"，其实日志里每轮都恢复了）。
     result = subprocess.run(
         [PLINK, "-batch", "-ssh", "-hostkey", HOSTKEY, "-pw", NAS_PASS,
          f"{NAS_USER}@{NAS_HOST}", cmd],
         capture_output=True, text=True, timeout=timeout, errors="replace",
+        encoding="utf-8",
     )
     return (result.stdout or "") + (result.stderr or "")
 

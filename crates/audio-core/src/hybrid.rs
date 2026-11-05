@@ -931,6 +931,12 @@ fn supervise(
             // A dying RFCOMM link can trickle its stale buffer for tens of
             // seconds, so "some bytes arrived" is not proof of life. Audio
             // should flow at tens of KB/s; anything far below is dead.
+            //
+            // W1: the *outbound* half of this test cannot be trusted — writes into
+            // a half-open link keep succeeding (7.8 KB/s measured against a blocked
+            // peer), which is why a leaf whose downlink is idle by design now has to
+            // answer a tunnel keepalive (see `bt::Liveness`). This window still
+            // catches the case where both directions really have stopped.
             if rx_window_start.elapsed() >= Duration::from_secs(6) {
                 let window = stats.rx_bytes.saturating_sub(rx_window_bytes);
                 let tx_window = stats.tx_bytes.saturating_sub(tx_window_bytes);
@@ -1017,12 +1023,35 @@ fn supervise(
             gap_max_ms: stats.gap_max_ms,
             gap_stalls_500ms: stats.gap_stalls_500ms,
             rx_kb_per_s: stats.gap_kb_per_s,
+            ka_rt: stats.ka_rt,
+            ka_dead: stats.ka_dead,
             last_error: last_error.clone(),
         };
         mesh.set_bt_status(status);
         // Flip the tunnel into N-1 mode together with the role it publishes,
         // so the mix sender and the relay switch in the same tick.
         tunnel.set_n1(acting_hub);
+        // W1: the keepalive may only be spoken to a peer that answers it — an
+        // older relay would inject the probe and never reply, and the probe would
+        // read as a dead link. A leaf probes the hub it dials; a hub probes only
+        // when every visible peer speaks the version. Inbound silence is only
+        // ambiguous while Wi-Fi is healthy, which is exactly when the topology (and
+        // so the peer's `proto`) is known: in pure-Bluetooth mode the leaf receives
+        // the N-1 mix continuously, so the byte window already proves liveness.
+        let wanted = crate::protocol::BT_KEEPALIVE_PROTO;
+        let supports_keepalive = if acting_hub {
+            !topology.is_empty() && topology.iter().all(|p| p.proto.unwrap_or(0) >= wanted)
+        } else {
+            current_hub
+                .as_ref()
+                .map(|hub| {
+                    topology
+                        .iter()
+                        .any(|p| p.uid == hub.uid && p.proto.unwrap_or(0) >= wanted)
+                })
+                .unwrap_or(false)
+        };
+        tunnel.set_keepalive(supports_keepalive);
         thread::sleep(Duration::from_millis(1000));
     }
     if let Some(listener) = shared.listener.lock().unwrap().take() {
@@ -1214,6 +1243,7 @@ mod tests {
             bit: Some(1),
             bt: bt.map(str::to_string),
             bt_channel: Some(16),
+            proto: Some(crate::protocol::MESH_PROTO_VERSION),
         }
     }
 
