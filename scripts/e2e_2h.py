@@ -22,6 +22,8 @@ import json
 import os
 import re
 import shutil
+import socket
+import statistics
 import subprocess
 import sys
 import time
@@ -94,6 +96,34 @@ def toolchain_env() -> None:
     if candidates:
         os.environ["PATH"] = ";".join(dict.fromkeys(candidates)) + ";" + \
             os.environ.get("PATH", "")
+
+
+def sntp_offset(host: str = "ntp.tencent.com", samples: int = 5) -> float | None:
+    """本机相对 NTP 源的偏差（ms，正值 = 本机快）。
+
+    `adb shell date` / `plink date` 的进程启动要几百毫秒，直接相减量不出 5 ms；
+    SNTP 往返的对称性误差只有几毫秒。
+    """
+    try:
+        addr = socket.getaddrinfo(host, 123, socket.AF_INET, socket.SOCK_DGRAM)[0][4]
+    except OSError:
+        return None
+    rows: list[float] = []
+    for _ in range(samples):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(2)
+        try:
+            sent = time.time()
+            sock.sendto(b"\x1b" + 47 * b"\x00", addr)
+            data, _ = sock.recvfrom(48)
+            received = time.time()
+        except OSError:
+            continue
+        finally:
+            sock.close()
+        server = int.from_bytes(data[40:48], "big") / 2**32 - 2208988800
+        rows.append((server - (sent + received) / 2) * 1000)
+    return statistics.median(rows) if rows else None
 
 
 def log(msg: str) -> None:
@@ -292,24 +322,30 @@ def p0_preflight() -> None:
             {"47900": rig, "stale": stale}
 
     def clock(_=None):
-        pc = datetime.now().timestamp()
-        nas_out = nas("date +%s.%N")
-        try:
-            nas_ts = float(nas_out.strip().splitlines()[-1])
-        except (ValueError, IndexError):
-            return "N/A", f"NAS 时间取不到：{nas_out.strip()[:60]}", {}
-        phone_out = adb("date +%s.%N")
-        try:
-            phone_ts = float(phone_out.strip().splitlines()[-1])
-        except (ValueError, IndexError):
-            phone_ts = None
-        pc_nas = (pc - nas_ts) * 1000
-        pc_phone = (pc - phone_ts) * 1000 if phone_ts is not None else None
-        ok = abs(pc_nas) < 5 and (pc_phone is None or abs(pc_phone) < 5)
+        pc = sntp_offset()  # 源 - 本机（正 = 本机慢）
+        nas_text = nas("timedatectl timesync-status 2>/dev/null | "
+                       "grep -E 'Offset|Stratum|Server:'")
+        match = re.search(r"Offset:\s*([-+0-9.]+)\s*(m?s)", nas_text)
+        nas_ms = None
+        if match:
+            # systemd 的 Offset 是"本机 - 源"；统一成"源 - 本机"再比较。
+            nas_ms = -float(match.group(1)) * (1000 if match.group(2) == "s" else 1)
+        auto = adb("settings get global auto_time").strip()
+        phone_text = adb("dumpsys time_detector 2>/dev/null | grep -o 'mUncertaintyMillis=[0-9]*' | tail -1")
+        phone_unc = re.search(r"=(\d+)", phone_text)
+        if pc is None:
+            return "N/A", "PC 访问 NTP 源失败", {}
+        skew = abs(pc - nas_ms) if nas_ms is not None else None
+        ok = abs(pc) < 5 and nas_ms is not None and abs(nas_ms) < 5 \
+            and (skew is None or skew < 10) and auto == "1"
         return ("PASS" if ok else "FAIL"), \
-            f"PC-NAS 偏差 {pc_nas:.1f} ms；PC-手机 {pc_phone if pc_phone is None else round(pc_phone, 1)} ms（<5 ms 才算合格）", \
-            {"pc_nas_ms": round(pc_nas, 1),
-             "pc_phone_ms": None if pc_phone is None else round(pc_phone, 1)}
+            f"PC 对 NTP {pc:.1f} ms；NAS timesyncd {nas_ms if nas_ms is None else round(nas_ms, 1)} ms；" \
+            f"手机 auto_time={auto}（NTP 不确定度 {phone_unc.group(1) if phone_unc else '?'} ms）；" \
+            f"PC-NAS 差 {None if skew is None else round(skew, 1)} ms（<5 ms 合格）", \
+            {"pc_ms": round(pc, 1),
+             "nas_ms": None if nas_ms is None else round(nas_ms, 1),
+             "pc_nas_skew_ms": None if skew is None else round(skew, 1),
+             "phone_auto_time": auto}
 
     def logcat(_=None):
         out = adb("logcat -G 16M")
