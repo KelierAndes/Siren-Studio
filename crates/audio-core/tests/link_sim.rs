@@ -16,10 +16,6 @@ use audio_core::mesh::MeshConfig;
 use audio_core::net::{spawn_link, LinkHandle, LinkProfile};
 use audio_core::protocol::MIX_STREAM_ID;
 
-/// 5 ms raw frames: the receiver counts `lost_frames` in *sample frames*
-/// (gap packets × 240), while `packets` counts datagrams.
-const SAMPLE_FRAMES_PER_PACKET: f64 = 240.0;
-
 /// A node pair plus the handles gating both directions of their link.
 struct TestMesh {
     sender: HybridNode,
@@ -150,9 +146,10 @@ fn rx_stream(mesh: &TestMesh) -> Option<audio_core::metrics::StreamSnapshot> {
         .find(|s| s.origin == mesh.sender_uid && s.stream_id != MIX_STREAM_ID)
 }
 
-/// Cumulative `lost_frames` (sample frames) converted to lost datagrams.
+/// `lost_frames` counts missing audio frames (= datagrams, one frame per
+/// packet); it used to count samples, which inflated every ratio by 240×.
 fn lost_packets(snapshot: &audio_core::metrics::StreamSnapshot) -> f64 {
-    snapshot.lost_frames as f64 / SAMPLE_FRAMES_PER_PACKET
+    snapshot.lost_frames as f64
 }
 
 /// Loss ratio over a window, given before/after snapshots.

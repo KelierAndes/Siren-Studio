@@ -1505,16 +1505,17 @@ fn run(
                             for decoder in peer.decoders.iter_mut().flatten() {
                                 decoder.reset();
                             }
-                            peer.metrics.lost_frames.fetch_add(
-                                remaining as u64 * frame_frames as u64,
-                                Ordering::Relaxed,
-                            );
+                            // 计数器按"帧"记（一个包一帧），不是采样数：以前这里
+                            // 乘了 frame_frames，前端"丢帧"被放大 240–480 倍。
+                            peer.metrics
+                                .lost_frames
+                                .fetch_add(remaining as u64, Ordering::Relaxed);
                             peer.zero_fill(remaining.saturating_mul(frame_frames));
                         }
                     } else {
                         peer.metrics
                             .lost_frames
-                            .fetch_add(lost as u64, Ordering::Relaxed);
+                            .fetch_add(gap as u64, Ordering::Relaxed);
                         peer.zero_fill(lost);
                     }
                 }
@@ -2147,6 +2148,55 @@ mod tests {
             .expect("second stream");
         assert_eq!(second.packets, 2);
         assert_eq!(second.lost_frames, 0);
+        receiver.stop();
+        drop(mixer);
+    }
+
+    #[test]
+    fn lost_frames_counts_frames_not_samples() {
+        fn raw_packet(seq: u32, stream: u16, origin: u64, frames: usize) -> Vec<u8> {
+            let mut packet = FrameHeader::new(Codec::RawF32, 5, stream, seq, now_us(), origin)
+                .encode()
+                .to_vec();
+            for _ in 0..frames * CHANNELS {
+                packet.extend_from_slice(&0.1f32.to_le_bytes());
+            }
+            packet
+        }
+        let (mixer, handle) = new_mixer(8);
+        let control = MixerControl::new(handle);
+        let receiver = spawn(
+            ReceiverConfig {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                target_ms: 50.0,
+                max_streams: 8,
+                live_target_ms: None,
+                mix_tap: None,
+                bt_exempt_ports: Vec::new(),
+                key: None,
+                gossip: None,
+            },
+            control,
+        )
+        .expect("receiver");
+        let socket = UdpSocket::bind("127.0.0.1:0").expect("socket");
+        let frames = frames_for_ms(5.0);
+        socket
+            .send_to(&raw_packet(10, 7, 0xFEED, frames), receiver.local_addr)
+            .expect("first");
+        socket
+            .send_to(&raw_packet(14, 7, 0xFEED, frames), receiver.local_addr)
+            .expect("gap");
+        std::thread::sleep(Duration::from_millis(250));
+        let snapshots = receiver.registry.snapshots();
+        let snap = snapshots
+            .iter()
+            .find(|snapshot| snapshot.label.contains("feed"))
+            .expect("stream");
+        assert_eq!(
+            snap.lost_frames, 3,
+            "3 个缺失包记 3 帧；按采样记会被放大成 720–1440"
+        );
         receiver.stop();
         drop(mixer);
     }

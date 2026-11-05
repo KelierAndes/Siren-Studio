@@ -74,6 +74,8 @@ pub struct StreamMetrics {
     /// timestamps to measure how long a carrier switch mutes the stream.
     pub starts: AtomicU32,
     pub packets: AtomicU64,
+    /// Missing audio frames (packets, since one packet carries one frame),
+    /// NOT samples — zero-filled/PLC covers the samples.
     pub lost_frames: AtomicU64,
     pub plc_frames: AtomicU64,
     pub overflow_packets: AtomicU64,

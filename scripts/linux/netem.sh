@@ -13,6 +13,7 @@
 # Iface defaults to the default-route interface. Profiles:
 #   clean     no impairment (qdiscs removed)
 #   loss2     2% independent loss
+#   loss5     5% independent loss
 #   loss10    10% independent loss
 #   burst     10% loss with 25% correlation (clustered drops)
 #   delay200  200 ms one-way delay (+-10 ms)
@@ -57,6 +58,7 @@ params_for() {
         raw)      echo "${RAW_PARAMS:-}" ;;
         clean)    echo "" ;;
         loss2)    echo "loss 2%" ;;
+        loss5)    echo "loss 5%" ;;
         loss10)   echo "loss 10%" ;;
         burst)    echo "loss 10% 25%" ;;
         delay200) echo "delay 200ms 10ms distribution normal" ;;
@@ -71,7 +73,7 @@ params_for() {
         reorder)  echo "delay 20ms 15ms distribution normal reorder 25% 50%" ;;
         dup)      echo "duplicate 5%" ;;
         corrupt)  echo "corrupt 0.5%" ;;
-        *) echo "netem.sh: unknown profile '$1' (clean loss2 loss10 burst delay200 jitter50 bw1800 raw)" >&2; exit 1 ;;
+        *) echo "netem.sh: unknown profile '$1' (clean loss2 loss5 loss10 burst delay200 jitter50 bw1800 raw)" >&2; exit 1 ;;
     esac
 }
 
@@ -102,9 +104,12 @@ apply_raw_audio_only() {
         ip link show "$IFB" >/dev/null 2>&1 || ip link add "$IFB" type ifb
         ip link set "$IFB" up
         tc qdisc add dev "$IFACE" handle ffff: ingress
+        # 入向必须按 dport 匹配：发送端是从临时端口发到我们的音频端口，
+        # 按 sport 47900 匹配等于什么都不丢（2026-11-05 实测 PC 的流来自
+        # 192.168.2.107:55519，sport 规则下 loss5 丢包率恒为 0）。
         tc filter add dev "$IFACE" parent ffff: protocol ip u32 \
             match ip protocol 17 0xff \
-            match ip sport "$port" 0xffff \
+            match ip dport "$port" 0xffff \
             action mirred egress redirect dev "$IFB"
         tc qdisc add dev "$IFB" root netem $PARAMS
     fi

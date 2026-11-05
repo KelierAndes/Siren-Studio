@@ -28,7 +28,7 @@ import subprocess
 import sys
 import time
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -134,10 +134,22 @@ def case(cid: str, phase: str, name: str, fn, **kw) -> str:
     """跑一个用例并落一行 cases.csv。fn 返回 (status, notes, metrics)。"""
     started = time.time()
     log(f"{cid} {name} …")
+    # 手机日志按用例切窗：每次用例开始清缓冲，函数里的 phone_logcat() 就只会
+    # 拿到本用例的日志。0.4 要看预检前的整段缓冲，单独保留。
+    if cid != "0.4":
+        try:
+            adb("logcat -c")
+        except Exception:  # noqa: BLE001 - 手机不在线时不该带崩用例
+            pass
     try:
         status, notes, metrics = fn(**kw)
     except Exception as error:  # noqa: BLE001 - 单用例异常不该带崩整轮
         status, notes, metrics = "FAIL", f"异常：{type(error).__name__}: {error}", {}
+    finally:
+        try:
+            save_slices(cid, started, time.time())
+        except Exception as error:  # noqa: BLE001 - 日志切片失败不影响判定
+            log(f"{cid} 日志切片失败：{type(error).__name__}: {error}")
     row = {
         "id": cid, "phase": phase, "case": name, "status": status,
         "seconds": round(time.time() - started, 1),
@@ -163,6 +175,42 @@ def na(reason: str):
     return "N/A", reason, {}
 
 
+def _utc_hms(ts: float) -> str:
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%H:%M:%S")
+
+
+def save_slices(cid: str, started: float, ended: float) -> None:
+    """把本用例时间窗内的 NAS / PC 日志切出来存到用例目录。
+
+    NAS 与 PC 的日志时间戳都是 UTC；daemon 重启前会另存一份 before.log，
+    两份都要扫，才不会在重启用例里丢掉半段。
+    """
+    directory = OUT / cid
+    directory.mkdir(parents=True, exist_ok=True)
+    a, b = _utc_hms(started), _utc_hms(ended)
+    try:
+        # 断网/重启中的用例不能把整轮拖住：切片只是取证，拿不到就跳过。
+        text = M.nas_sh("cat /tmp/siren-web.log /tmp/siren-web.before.log 2>/dev/null",
+                        timeout=15)
+    except Exception:  # noqa: BLE001
+        text = ""
+    nas_rows = []
+    for line in text.splitlines():
+        if len(line) > 21 and "T" in line[:22] and a <= line.split("T", 1)[1][:8] <= b:
+            nas_rows.append(line)
+    if nas_rows:
+        (directory / "nas.log").write_text("\n".join(nas_rows), encoding="utf-8")
+    pc_path = M.PC_LOG
+    if pc_path.exists():
+        pc_rows = []
+        for line in pc_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            match = re.search(r"T(\d\d:\d\d:\d\d)", line)
+            if match and a <= match.group(1) <= b:
+                pc_rows.append(line)
+        if pc_rows:
+            (directory / "pc.log").write_text("\n".join(pc_rows), encoding="utf-8")
+
+
 # ------------------------------------------------------------------ 设备动作
 
 def adb(cmd: str) -> str:
@@ -178,8 +226,13 @@ def nas_sudo(cmd: str) -> str:
 
 
 def netem(profile: str, direction: str = "both") -> str:
-    return nas_sudo(
+    out = nas_sudo(
         f"AUDIO_ONLY=1 DIRECTION={direction} bash $HOME/scripts/linux/netem.sh apply {profile}")
+    # 未知档位时 netem.sh 只打印错误并以 1 退出；不检查的话用例会在干净网络上
+    # 跑完还判"通过"（上一轮 C6 就是这样拿到 lost=0 的）。
+    if "netem: applied" not in out:
+        raise RuntimeError(f"netem {profile} 未生效：{out.strip()[:200]}")
+    return out
 
 
 def netem_clear() -> str:
@@ -207,6 +260,7 @@ def digest(snap: dict) -> dict:
         "underruns": sum(int(s.get("underruns") or 0) for s in streams),
         "trims": sum(int(s.get("buffer_resets") or 0) for s in streams),
         "lost": sum(int(s.get("lost_frames") or 0) for s in streams),
+        "packets": sum(int(s.get("packets") or 0) for s in streams),
         "buf": [round(float(s.get("buffer_ms") or 0)) for s in streams],
         "rms": round(float(master.get("rms_db") or -120), 1),
         "silent_ms": int(master.get("silent_ms") or 0),
@@ -236,10 +290,14 @@ def delta(series: list[dict]) -> dict:
     if len(series) < 2:
         return {}
     first, last = series[0], series[-1]
+    packets = last["packets"] - first["packets"]
+    lost = last["lost"] - first["lost"]
     return {
         "underruns": last["underruns"] - first["underruns"],
         "trims": last["trims"] - first["trims"],
-        "lost": last["lost"] - first["lost"],
+        "lost": lost,
+        "packets": packets,
+        "loss_pct": round(100.0 * lost / packets, 2) if packets > 0 else None,
         "silent_ms": last["silent_ms"] - first["silent_ms"],
         "buf_end": last["buf"],
         "bt_links_end": last["bt_links"],
@@ -351,9 +409,11 @@ def p0_preflight() -> None:
              "phone_auto_time": auto}
 
     def logcat(_=None):
-        out = adb("logcat -G 16M")
-        growing = phone_logcat("P0_logcat")
-        return "PASS", f"logcat 缓冲：{out.strip()[:40]}；已落盘 I 级 {len(growing)} 字节", {}
+        # 用例开始会清缓冲，这里检查"缓冲容量是否 16M"而不是当前内容大小；
+        # 每个用例的日志由 case() 分别落盘。
+        size = adb("logcat -g")
+        tail = size.strip().splitlines()[-1] if size.strip() else "未知"
+        return "PASS", f"logcat 缓冲：{tail[:80]}", {"ring": tail[:80]}
 
     def bt_reset(_=None):
         nas_sudo("hciconfig hci0 reset 2>&1 | tail -1")
@@ -462,21 +522,6 @@ def p2_baseline() -> None:
         return "PASS", f"入向路径集合={sorted(set(paths))} links={series[-1]['bt_links'] if series else '-'} {ghost}", \
             {"paths": sorted(set(paths))}
 
-    def c7(_=None):
-        # 让 PC 节点用 loopback 且不播放 → 采集全零 → E2 抑制。
-        env = {**os.environ, "SIREN_UI_AUTOSTART": "1", "SIREN_UI_MESH_NAME": "SIREN-PC",
-               "SIREN_UI_MESH_SOURCE": "loopback", "SIREN_UI_MESH_OUTPUT": "0"}
-        proc = subprocess.Popen([str(PC_EXE)], env=env, stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL)
-        time.sleep(40)
-        snap = nas_snapshot()
-        proc.terminate()
-        sender = snap.get("sender") or {}
-        silent = (sender.get("silent_ms") or 0) > 0 and (sender.get("tx_rms_db") or -120) <= -60
-        return ("PASS" if silent else "FAIL"), \
-            f"hub 源静音判定：silent_ms={sender.get('silent_ms')} tx={sender.get('tx_rms_db')}", \
-            {"silent_ms": sender.get("silent_ms"), "tx": sender.get("tx_rms_db")}
-
     case("C1", "P2", "三节点干净基线 4 min", c1)
     case("C2", "P2", "双栈稳态 2 min", c2)
     case("C3", "P2", "信号链黄金向量", lambda _=None: na(
@@ -485,15 +530,73 @@ def p2_baseline() -> None:
         "`--tick-skew-ppm` 尚未实现（§15.1 待补）"))
     case("C5", "P2", "采集 A/B", lambda _=None: skip("需要外部连续正弦源与 WASAPI 回环录制，未编排"))
     case("C6", "P2", "丢包校准 5% 60 s", lambda _=None: _c6())
-    case("C7", "P2", "静音源 E2", c7)
+    case("C7", "P2", "静音源 E2", _c7)
 
 
 def _c6():
-    netem("raw5")
-    series = sample("C6", 60)
-    netem_clear()
+    # 双栈会把 Wi-Fi 丢掉的包用蓝牙副本补上（去重后看不到丢包），校准时要先
+    # 关掉被测路径的备份载体，否则 5% 注入只会量到 ~2.5%。
+    nas_sudo("rfkill block bluetooth")
+    try:
+        netem("loss5")
+        series = sample("C6", 60)
+    finally:
+        netem_clear()
+        nas_sudo("rfkill unblock bluetooth")
     d = delta(series)
-    return ("PASS" if d.get("lost", 0) >= 0 else "FAIL"), f"5% 丢包 60 s：{d}", d
+    pct = d.get("loss_pct")
+    ok = pct is not None and 3.0 <= pct <= 8.0
+    return ("PASS" if ok else "FAIL"), \
+        f"5% 丢包 60 s（NAS 蓝牙关闭，排除备份副本）：实测丢包率 {pct} %（判据 3–8%）", d
+
+
+def _c7(_=None):
+    # E2 全零不上行。Windows 侧 tone 不走采集管（silent_ms 不计数），loopback
+    # 又会被正在播放的混音填满；改在 NAS 跑独立节点：默认 sink 是空的
+    # siren_capture，loopback 采集严格全零，采集管路径也能走到。
+    nas("rm -f /tmp/silent_node.jsonl")
+    nas(
+        "setsid nohup env SIREN_NODE_ID=0000000000005e11 "
+        "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "
+        "XDG_RUNTIME_DIR=/run/user/1000 /usr/local/bin/siren --log warn mesh "
+        "--port 48021 --name SILENT-NAS --source loopback --no-play --json "
+        "--duration 25 > /tmp/silent_node.jsonl 2>&1 </dev/null & echo started")
+    time.sleep(28)
+    text = nas("cat /tmp/silent_node.jsonl")
+    snaps = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if "sender" in parsed:
+            snaps.append(parsed)
+    last = snaps[-1] if snaps else {}
+    sender = last.get("sender") or {}
+    node_id = int(last.get("node_id") or "0", 16)
+    capture = int(sender.get("capture_frames") or 0)
+    gained_silent = int(sender.get("capture_silent_frames") or 0)
+    silent = ((sender.get("silent_ms") or 0) >= 200
+              and (sender.get("tx_rms_db") or -120) <= -60
+              and capture > 0 and gained_silent == capture
+              and int(sender.get("packets") or 0) == 0)
+    snap = nas_snapshot()
+    hub_sees = any((peer.get("name") or "").startswith("SILENT-NAS")
+                   for peer in (snap.get("peers") or []))
+    own_stream = any(int(str(stream.get("origin") or "0"), 16) == node_id
+                     for stream in (snap.get("center") or {}).get("streams") or [])
+    ok = bool(snaps) and silent and hub_sees and not own_stream
+    return ("PASS" if ok else "FAIL"), \
+        f"静音节点 25 s：采样 {len(snaps)} 次 silent_ms={sender.get('silent_ms')} " \
+        f"tx={sender.get('tx_rms_db')} 上行包={sender.get('packets')} " \
+        f"采集全零={gained_silent}/{capture} hub 见={hub_sees} 有音频流={own_stream}", \
+        {"snapshots": len(snaps), "silent_ms": sender.get("silent_ms"),
+         "tx": sender.get("tx_rms_db"), "packets": sender.get("packets"),
+         "capture_frames": capture, "capture_silent_frames": gained_silent,
+         "hub_sees": hub_sees, "own_stream": own_stream}
 
 
 def p3_wifi() -> None:
@@ -511,7 +614,7 @@ def p3_wifi() -> None:
         return status, f"{note} NAS {d}；手机 {counts}", {**d, **counts}
 
     case("W1", "P3", "突发丢包 ge3 60 s", lambda _=None: inject("W1", "ge3", 60))
-    case("W2", "P3", "随机丢包 5% 60 s", lambda _=None: inject("W2", "loss2", 60))
+    case("W2", "P3", "随机丢包 5% 60 s", lambda _=None: inject("W2", "loss5", 60))
     case("W3", "P3", "黑洞 0.3 s ×3", lambda _=None: _blackouts())
     case("W4", "P3", "乱序+抖动 60 s", lambda _=None: inject("W4", "reorder", 60,
         note="已知开放（重排容忍），对照 Phase 0 1278/407"))
@@ -560,6 +663,40 @@ def _f5_cycle():
         {"degrade_s": degrade["t_s"], "restore_s": restore["t_s"]}
 
 
+def nas_local_sampler_start(seconds: int = 320) -> None:
+    """在 NAS 本机起一个脱离会话的采样器。
+
+    B7 会把 NAS 的两个网口都断掉，届时从 PC 侧 HTTP 轮询必然失败（上一轮由此
+    把"看不到"当成了"没有混音"）。这个循环在 NAS 内部读 localhost，断网照常。
+    """
+    nas_sh(
+        "rm -f /tmp/siren_local.jsonl; "
+        "setsid nohup bash -c '"
+        f"for i in $(seq {seconds}); do "
+        "curl -s -m 2 localhost:8090/api/status >> /tmp/siren_local.jsonl; "
+        "echo >> /tmp/siren_local.jsonl; sleep 1; done' >/dev/null 2>&1 </dev/null & echo started"
+    )
+
+
+def nas_local_sampler_fetch() -> list[dict]:
+    text = nas_sh("cat /tmp/siren_local.jsonl 2>/dev/null")
+    snaps = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            snaps.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return snaps
+
+
+def archive_nas_log() -> None:
+    """daemon 重启会用 `>` 截断 /tmp/siren-web.log，重启前先留一份。"""
+    nas("cp /tmp/siren-web.log /tmp/siren-web.before.log 2>/dev/null || true")
+
+
 def p4_dualstack() -> None:
     def b2(_=None):
         # 4 次 Wi-Fi 硬断 5 s，恢复后 45 s 内每秒采入向载体
@@ -582,19 +719,25 @@ def p4_dualstack() -> None:
         return ("PASS" if d.get("silent_ms", 0) == 0 else "FAIL"), f"蓝牙掉 5 s：NAS {d}", d
 
     def b7(_=None):
-        # 纯蓝牙叶子：断手机 Wi-Fi + 断 NAS 两个口，分钟级 P8 混音专项
+        # 纯蓝牙叶子：断手机 Wi-Fi + 断 NAS 两个口。断网期间由 NAS 本机采样，
+        # 否则从 PC 侧轮询只会拿到空快照（上一轮的 0/238 就是这样来的）。
         adb("svc wifi disable")
-        M.nas_lan_cut(240)
+        nas_local_sampler_start(340)
+        M.nas_lan_cut(260)
         time.sleep(30)
-        series = sample("B7", 240)
+        time.sleep(240)
         M.nas_lan_restore()
         adb("svc wifi enable")
-        text = phone_logcat("B7")
-        counts = phone_counts(text)
-        mix_rows = [row for row in series if row["mix"]]
-        return "KNOWN-OPEN", \
-            f"混音在 {len(mix_rows)}/{len(series)} 采样；手机 {counts}；末水位 {series[-1]['buf'] if series else '-'}", \
-            {"mix_frac": round(len(mix_rows) / max(1, len(series)), 2), **counts}
+        snaps = nas_local_sampler_fetch()
+        rows = [digest(item.get("snapshot") or {}) for item in snaps]
+        bt_rows = [row for row in rows if "bt" in row["paths"]]
+        mix_rows = [row for row in rows if row["mix"]]
+        counts = phone_counts(phone_logcat("B7"))
+        # 场景没成立（NAS 还在 Wi-Fi 上）时不能把"没看到混音"当成 MIX1 结论。
+        status = "KNOWN-OPEN" if len(bt_rows) >= 30 else "FAIL"
+        return status, \
+            f"本机采样 {len(rows)} 次，其中 bt 载体 {len(bt_rows)}、混音到达 {len(mix_rows)}；手机 {counts}", \
+            {"samples": len(rows), "bt_rows": len(bt_rows), "mix_rows": len(mix_rows), **counts}
 
     def b9(_=None):
         # hub 蓝牙阻断 60 s，数手机拨号次数
@@ -657,11 +800,17 @@ def p5_scale() -> None:
 
     def scale(n, seconds=40):
         procs = synthetic(n, seconds)
+        alive = sum(1 for proc in procs if proc.poll() is None)
         snap = nas_snapshot()
         stop(procs)
         peers = len(snap.get("peers") or [])
-        return ("PASS" if peers >= min(n, 6) else "KNOWN-OPEN"), \
-            f"合成 {n} 台，hub 发现 {peers} 台", {"n": n, "peers": peers}
+        if alive < n:
+            status = "FAIL" if n <= 16 else "KNOWN-OPEN"
+            note = f"合成 {n} 台，仅 {alive} 台存活、hub 发现 {peers} 台（本机起不来，非产品结论）"
+        else:
+            status = "PASS" if peers >= min(n, 6) else "KNOWN-OPEN"
+            note = f"合成 {n} 台（{alive} 存活），hub 发现 {peers} 台"
+        return status, note, {"n": n, "alive": alive, "peers": peers}
 
     case("S1", "P5", "N=4 规模", lambda _=None: scale(4))
     case("S2", "P5", "N=8 规模", lambda _=None: scale(8))
@@ -678,6 +827,7 @@ def p6_faults() -> None:
         if pid:
             nas_sudo(f"kill {pid}")
             time.sleep(2)
+        archive_nas_log()
         M.daemon_start()
         joined = M.ensure_nas_joined(require_peers=True, timeout=60)
         return ("PASS" if joined.get("running") else "FAIL"), f"kill+restart：{joined}", joined
@@ -693,6 +843,7 @@ def p6_faults() -> None:
         nas_sudo("systemctl restart pipewire pipewire-pulse wireplumber 2>/dev/null || "
                  "runuser -u kelierandes -- systemctl --user restart pipewire pipewire-pulse wireplumber")
         time.sleep(10)
+        archive_nas_log()
         M.daemon_start()
         g = M.audio_graph_preflight()
         loop = g.get("monitor_sink_id") not in (None, g.get("play_sink_id"))
