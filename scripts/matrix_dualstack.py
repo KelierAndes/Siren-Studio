@@ -198,7 +198,11 @@ def audio_graph_preflight() -> dict:
     tx_db = None
     try:
         snap = json.loads(blocks[3].strip()).get("snapshot") or {}
-        tx_db = round((snap.get("sender") or {}).get("tx_rms_db", 0), 1)
+        sender = snap.get("sender") or {}
+        # 引擎刚重启时 snapshot 里没有 sender；缺数据要留 None，不能默认成 0 dBFS
+        # 让"上行有电平"的检查蒙混过关。
+        if "tx_rms_db" in sender:
+            tx_db = round(sender["tx_rms_db"], 1)
     except (json.JSONDecodeError, TypeError):
         pass
     return {

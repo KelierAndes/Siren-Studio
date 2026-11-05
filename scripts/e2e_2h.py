@@ -386,8 +386,9 @@ def p0_preflight() -> None:
         ("0.3", "对时", clock),
         ("0.4", "手机 logcat 全量", logcat),
         ("0.5", "BT 栈复位", bt_reset),
-        ("0.6", "play_sink / 隔离", graph),
-        ("0.7", "NAS 守护入网", daemon),
+        # 先断言入网、再看音频图：引擎在无流时会自行退出，反序会拍到空快照。
+        ("0.6", "NAS 守护入网", daemon),
+        ("0.7", "play_sink / 隔离", graph),
         ("0.8", "netem 干跑", netem_dry),
         ("0.9", "检测器自检", lambda _=None: na("逐音检测在 P8 离线跑 `siren analyze --freq`，P0 不做在线自检")),
     ]:
