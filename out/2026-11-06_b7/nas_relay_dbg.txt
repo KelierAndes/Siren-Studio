@@ -1,0 +1,2 @@
+[2026-11-05T17:53:50.203Z INFO  audio_core::mesh] bt: relay dbg: hub=true pcm=480 mix_local=960 dest=1 bt_flags=[false] tap_all=72a176cebfe88db4/960s/false
+[2026-11-05T17:54:10.203Z INFO  audio_core::mesh] bt: relay dbg: hub=true pcm=480 mix_local=960 dest=1 bt_flags=[false] tap_all=72a176cebfe88db4/960s/false

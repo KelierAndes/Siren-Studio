@@ -1,0 +1,127 @@
+--------- beginning of main
+11-06 01:24:47.891 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:24:48.266 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 330243 pkts 150090 lost 2 resets 0 underruns 0 buffer 77 ms target 100 rms -15.1 dB
+11-06 01:24:51.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 391435 packet(s))
+11-06 01:24:53.271 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 331244 pkts 151091 lost 2 resets 0 underruns 0 buffer 80 ms target 100 rms -15.0 dB
+11-06 01:24:56.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 393435 packet(s))
+11-06 01:24:57.893 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:24:58.271 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 332244 pkts 152091 lost 2 resets 0 underruns 0 buffer 71 ms target 100 rms -25.1 dB
+11-06 01:24:58.889 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:25:01.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 395435 packet(s))
+11-06 01:25:01.690 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:25:03.271 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 333244 pkts 153091 lost 2 resets 0 underruns 0 buffer 82 ms target 100 rms -15.1 dB
+11-06 01:25:04.489 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:25:06.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 397435 packet(s))
+11-06 01:25:07.894 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:25:08.271 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 334244 pkts 154091 lost 2 resets 0 underruns 0 buffer 93 ms target 100 rms -15.1 dB
+11-06 01:25:10.094 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:25:11.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 399435 packet(s))
+11-06 01:25:12.895 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:25:13.276 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 335245 pkts 155092 lost 2 resets 0 underruns 0 buffer 84 ms target 100 rms -15.3 dB
+11-06 01:25:16.632 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 401435 packet(s))
+11-06 01:25:17.897 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:25:18.281 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 336246 pkts 156093 lost 2 resets 0 underruns 0 buffer 90 ms target 100 rms -15.0 dB
+11-06 01:25:18.499 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:25:21.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 403435 packet(s))
+11-06 01:25:23.284 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 337246 pkts 157093 lost 2 resets 0 underruns 0 buffer 83 ms target 100 rms -15.1 dB
+11-06 01:25:26.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 405435 packet(s))
+11-06 01:25:27.899 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:25:28.286 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 338247 pkts 158094 lost 2 resets 0 underruns 0 buffer 74 ms target 100 rms -15.2 dB
+11-06 01:25:31.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 407435 packet(s))
+11-06 01:25:32.505 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:25:33.286 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 339247 pkts 159094 lost 2 resets 0 underruns 0 buffer 83 ms target 100 rms -15.1 dB
+11-06 01:25:35.309 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:25:36.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 409435 packet(s))
+11-06 01:25:37.901 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:25:38.109 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:25:38.291 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 340248 pkts 160095 lost 2 resets 0 underruns 0 buffer 71 ms target 100 rms -18.8 dB
+11-06 01:25:40.909 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:25:41.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 411435 packet(s))
+11-06 01:25:43.291 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 341248 pkts 161095 lost 2 resets 0 underruns 0 buffer 76 ms target 100 rms -15.1 dB
+11-06 01:25:46.514 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:25:46.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 413435 packet(s))
+11-06 01:25:47.903 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:25:48.296 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 342249 pkts 162096 lost 2 resets 0 underruns 0 buffer 77 ms target 100 rms -15.0 dB
+11-06 01:25:51.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 415435 packet(s))
+11-06 01:25:52.114 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:25:53.302 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 343250 pkts 163097 lost 2 resets 0 underruns 0 buffer 75 ms target 100 rms -15.1 dB
+11-06 01:25:54.915 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:25:56.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 417435 packet(s))
+11-06 01:25:57.719 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:25:57.905 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:25:58.306 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 344251 pkts 164098 lost 2 resets 0 underruns 0 buffer 71 ms target 100 rms -15.8 dB
+11-06 01:26:01.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 419435 packet(s))
+11-06 01:26:03.311 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 345252 pkts 165099 lost 2 resets 0 underruns 0 buffer 74 ms target 100 rms -15.0 dB
+11-06 01:26:03.319 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:26:06.124 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:26:06.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 421435 packet(s))
+11-06 01:26:07.907 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:26:08.316 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 346253 pkts 166100 lost 2 resets 0 underruns 0 buffer 79 ms target 100 rms -15.9 dB
+11-06 01:26:08.925 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:26:11.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 423435 packet(s))
+11-06 01:26:13.316 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 347253 pkts 167100 lost 2 resets 0 underruns 0 buffer 74 ms target 100 rms -15.1 dB
+11-06 01:26:16.632 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 425435 packet(s))
+11-06 01:26:17.329 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:26:17.909 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:26:18.316 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 348253 pkts 168100 lost 2 resets 0 underruns 0 buffer 83 ms target 100 rms -15.0 dB
+11-06 01:26:20.129 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:26:21.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 427435 packet(s))
+11-06 01:26:22.934 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:26:23.321 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 349254 pkts 169101 lost 2 resets 0 underruns 0 buffer 69 ms target 100 rms -15.1 dB
+11-06 01:26:26.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 429435 packet(s))
+11-06 01:26:27.912 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:26:28.321 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 350254 pkts 170101 lost 2 resets 0 underruns 0 buffer 84 ms target 100 rms -15.0 dB
+11-06 01:26:28.534 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:26:31.339 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:26:31.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 431435 packet(s))
+11-06 01:26:33.326 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 351255 pkts 171102 lost 2 resets 0 underruns 0 buffer 89 ms target 100 rms -25.5 dB
+11-06 01:26:34.140 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:26:36.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 433435 packet(s))
+11-06 01:26:37.916 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:26:38.328 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 352255 pkts 172102 lost 2 resets 0 underruns 0 buffer 85 ms target 100 rms -15.1 dB
+11-06 01:26:39.749 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:26:41.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 435435 packet(s))
+11-06 01:26:42.549 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:26:43.332 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 353256 pkts 173103 lost 2 resets 0 underruns 0 buffer 91 ms target 100 rms -15.0 dB
+11-06 01:26:46.632 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 437435 packet(s))
+11-06 01:26:47.919 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:26:48.150 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:26:48.336 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 354257 pkts 174104 lost 2 resets 0 underruns 0 buffer 80 ms target 100 rms -15.3 dB
+11-06 01:26:51.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 439435 packet(s))
+11-06 01:26:53.341 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 355258 pkts 175105 lost 2 resets 0 underruns 0 buffer 76 ms target 100 rms -15.3 dB
+11-06 01:26:53.754 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:26:56.633 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 441435 packet(s))
+11-06 01:26:57.921 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:26:58.341 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 356258 pkts 176105 lost 2 resets 0 underruns 0 buffer 85 ms target 100 rms -15.0 dB
+11-06 01:27:01.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 443435 packet(s))
+11-06 01:27:02.159 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:27:03.341 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 357258 pkts 177105 lost 2 resets 0 underruns 0 buffer 75 ms target 100 rms -15.0 dB
+11-06 01:27:04.959 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:27:06.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 445435 packet(s))
+11-06 01:27:07.759 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:27:07.922 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:27:08.346 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 358259 pkts 178106 lost 2 resets 0 underruns 0 buffer 78 ms target 100 rms -15.0 dB
+11-06 01:27:11.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 447435 packet(s))
+11-06 01:27:13.351 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 359260 pkts 179107 lost 2 resets 0 underruns 0 buffer 78 ms target 100 rms -15.0 dB
+11-06 01:27:16.164 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:27:16.632 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 449435 packet(s))
+11-06 01:27:17.924 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:27:18.352 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 360260 pkts 180107 lost 2 resets 0 underruns 0 buffer 78 ms target 100 rms -14.9 dB
+11-06 01:27:21.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 451435 packet(s))
+11-06 01:27:21.769 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:27:23.356 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 361261 pkts 181106 lost 4 resets 0 underruns 0 buffer 74 ms target 100 rms -14.7 dB
+11-06 01:27:26.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 453435 packet(s))
+11-06 01:27:27.926 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:27:28.361 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 362262 pkts 182107 lost 4 resets 0 underruns 0 buffer 83 ms target 100 rms -14.8 dB
+11-06 01:27:31.632 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 455435 packet(s))
+11-06 01:27:33.362 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 363262 pkts 183107 lost 4 resets 0 underruns 0 buffer 88 ms target 100 rms -15.0 dB
+11-06 01:27:36.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 457435 packet(s))
+11-06 01:27:37.928 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)
+11-06 01:27:38.368 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 364263 pkts 184108 lost 4 resets 0 underruns 0 buffer 82 ms target 100 rms -15.0 dB
+11-06 01:27:38.575 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:27:41.632 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 459435 packet(s))
+11-06 01:27:43.372 27436 30675 I siren   : udp: stream 1340590776188811572 wifi seq 365264 pkts 185109 lost 4 resets 0 underruns 0 buffer 87 ms target 100 rms -14.9 dB
+11-06 01:27:44.179 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:27:46.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 461435 packet(s))
+11-06 01:27:46.984 27436 30683 I siren   : mesh: peer Linux-ISO (mesh) moved 192.168.2.159 -> 192.168.2.196 (from received audio)
+11-06 01:27:47.931 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 0.0 KB/s, write drops 0, no downlink packets (idle by design while Wi-Fi works)

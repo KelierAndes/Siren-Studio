@@ -1243,6 +1243,28 @@ fn run_mesh_sender(
                         shared
                             .mix_tap
                             .snapshot(mix_samples, origin, Duration::from_millis(500));
+                    // Rate-limited relay diagnosis (B7, 2026-11-06): the relay
+                    // was once found wedged (tx 0 while tap had a valid BT
+                    // destination) until the daemon restarted; this line makes
+                    // a recurrence visible in the log. One line a minute.
+                    static DBG: std::sync::atomic::AtomicU64 =
+                        std::sync::atomic::AtomicU64::new(0);
+                    let dbg_tick = DBG.fetch_add(1, Ordering::Relaxed);
+                    if dbg_tick % 12000 == 0 {
+                        let all = shared.mix_tap.snapshot(mix_samples, 0, Duration::from_secs(5));
+                        log::info!(
+                            "bt: relay dbg: hub={} pcm={} mix_local={} dest={} bt_flags={:?} tap_all={}",
+                            shared.bt_hub.load(Ordering::Relaxed),
+                            pcm.len(),
+                            mix_local.len(),
+                            destinations.len(),
+                            destinations.iter().map(|(_, _, bt, _)| *bt).collect::<Vec<_>>(),
+                            all.iter()
+                                .map(|(u, s, bt, _)| format!("{u:016x}/{}s/{}", s.len(), bt))
+                                .collect::<Vec<_>>()
+                                .join(","),
+                        );
+                    }
                     if !destinations.is_empty() && !n1_logged {
                         n1_logged = true;
                         log::info!(

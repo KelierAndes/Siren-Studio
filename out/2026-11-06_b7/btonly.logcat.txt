@@ -1,0 +1,160 @@
+--------- beginning of main
+11-06 01:49:04.700 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:49:06.271 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 50 max 51 ms, stalls >500 ms: 0 (499 samples)
+11-06 01:49:06.284 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 13015 pkts 13015 lost 0 resets 0 underruns 0 buffer 226 ms target 250 rms -15.9 dB
+11-06 01:49:06.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 941486 packet(s))
+11-06 01:49:11.298 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 13514 pkts 13514 lost 0 resets 0 underruns 0 buffer 222 ms target 250 rms -15.6 dB
+11-06 01:49:11.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 943486 packet(s))
+11-06 01:49:13.107 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.159:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:49:15.912 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:49:16.273 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 50 max 41 ms, stalls >500 ms: 0 (501 samples)
+11-06 01:49:16.306 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 14017 pkts 14017 lost 0 resets 0 underruns 0 buffer 231 ms target 250 rms -14.4 dB
+11-06 01:49:16.632 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 945486 packet(s))
+11-06 01:49:18.713 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.159:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:49:21.306 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 14517 pkts 14517 lost 0 resets 0 underruns 0 buffer 218 ms target 250 rms -27.7 dB
+11-06 01:49:21.517 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:49:21.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 947486 packet(s))
+11-06 01:49:24.316 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.159:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:49:26.276 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 50 max 50 ms, stalls >500 ms: 0 (501 samples)
+11-06 01:49:26.316 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 15018 pkts 15018 lost 0 resets 0 underruns 0 buffer 224 ms target 250 rms -13.2 dB
+11-06 01:49:26.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 949486 packet(s))
+11-06 01:49:31.324 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 15519 pkts 15519 lost 0 resets 0 underruns 0 buffer 230 ms target 250 rms -13.9 dB
+11-06 01:49:31.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 951486 packet(s))
+11-06 01:49:36.278 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 50 max 51 ms, stalls >500 ms: 0 (500 samples)
+11-06 01:49:36.324 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 16019 pkts 16019 lost 0 resets 0 underruns 0 buffer 230 ms target 250 rms -14.3 dB
+11-06 01:49:36.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 953486 packet(s))
+11-06 01:49:38.327 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:49:41.326 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 16519 pkts 16519 lost 0 resets 0 underruns 0 buffer 240 ms target 250 rms -13.5 dB
+11-06 01:49:41.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 955486 packet(s))
+11-06 01:49:46.282 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 25 max 56 ms, stalls >500 ms: 0 (500 samples)
+11-06 01:49:46.335 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 17020 pkts 17020 lost 0 resets 0 underruns 0 buffer 226 ms target 250 rms -13.8 dB
+11-06 01:49:46.633 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 957486 packet(s))
+11-06 01:49:46.736 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.159:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:49:51.337 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 17520 pkts 17520 lost 0 resets 0 underruns 0 buffer 231 ms target 250 rms -13.5 dB
+11-06 01:49:51.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 959486 packet(s))
+11-06 01:49:56.285 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 50 max 47 ms, stalls >500 ms: 0 (499 samples)
+11-06 01:49:56.344 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 18021 pkts 18021 lost 0 resets 0 underruns 0 buffer 239 ms target 250 rms -15.6 dB
+11-06 01:49:56.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 961486 packet(s))
+11-06 01:50:00.740 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:50:01.349 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 18521 pkts 18521 lost 0 resets 0 underruns 0 buffer 249 ms target 250 rms -15.3 dB
+11-06 01:50:01.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 963486 packet(s))
+11-06 01:50:06.287 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 50 max 56 ms, stalls >500 ms: 0 (500 samples)
+11-06 01:50:06.346 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.159:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:50:06.354 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 19022 pkts 19022 lost 0 resets 0 underruns 0 buffer 221 ms target 250 rms -14.7 dB
+11-06 01:50:06.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 965486 packet(s))
+11-06 01:50:11.367 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 19522 pkts 19522 lost 0 resets 0 underruns 0 buffer 238 ms target 250 rms -14.0 dB
+11-06 01:50:11.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 967486 packet(s))
+11-06 01:50:14.750 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:50:16.289 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 50 max 57 ms, stalls >500 ms: 0 (499 samples)
+11-06 01:50:16.377 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 20024 pkts 20024 lost 0 resets 0 underruns 0 buffer 226 ms target 250 rms -14.2 dB
+11-06 01:50:16.634 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 969486 packet(s))
+11-06 01:50:17.550 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.159:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:50:20.351 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:50:21.394 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 20525 pkts 20525 lost 0 resets 0 underruns 0 buffer 227 ms target 250 rms -14.0 dB
+11-06 01:50:21.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 971486 packet(s))
+11-06 01:50:26.291 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 25 max 59 ms, stalls >500 ms: 0 (500 samples)
+11-06 01:50:26.395 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 21026 pkts 21026 lost 0 resets 0 underruns 0 buffer 219 ms target 250 rms -13.1 dB
+11-06 01:50:26.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 973486 packet(s))
+11-06 01:50:28.757 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.159:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:50:31.397 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 21526 pkts 21526 lost 0 resets 0 underruns 0 buffer 237 ms target 250 rms -15.1 dB
+11-06 01:50:31.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 975486 packet(s))
+11-06 01:50:36.295 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 50 max 50 ms, stalls >500 ms: 0 (500 samples)
+11-06 01:50:36.405 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 22027 pkts 22027 lost 0 resets 0 underruns 0 buffer 247 ms target 250 rms -14.0 dB
+11-06 01:50:36.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 977486 packet(s))
+11-06 01:50:37.166 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:50:41.406 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 22527 pkts 22527 lost 0 resets 0 underruns 0 buffer 236 ms target 250 rms -14.2 dB
+11-06 01:50:41.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 979486 packet(s))
+11-06 01:50:42.771 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.159:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:50:46.298 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 50 max 45 ms, stalls >500 ms: 0 (499 samples)
+11-06 01:50:46.413 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 23027 pkts 23027 lost 0 resets 0 underruns 0 buffer 235 ms target 250 rms -13.3 dB
+11-06 01:50:46.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 981486 packet(s))
+11-06 01:50:48.376 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:50:51.175 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.159:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:50:51.414 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 23528 pkts 23527 lost 0 resets 0 underruns 0 buffer 237 ms target 250 rms -13.6 dB
+11-06 01:50:51.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 983486 packet(s))
+11-06 01:50:53.982 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:50:56.301 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 50 max 42 ms, stalls >500 ms: 0 (500 samples)
+11-06 01:50:56.416 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 24028 pkts 24027 lost 0 resets 0 underruns 0 buffer 225 ms target 250 rms -14.0 dB
+11-06 01:50:56.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 985486 packet(s))
+11-06 01:50:56.781 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.159:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:50:59.586 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:51:01.418 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 24528 pkts 24527 lost 0 resets 0 underruns 0 buffer 233 ms target 250 rms -13.9 dB
+11-06 01:51:01.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 987486 packet(s))
+11-06 01:51:02.386 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.159:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:51:05.186 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:51:06.303 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 25 max 57 ms, stalls >500 ms: 0 (500 samples)
+11-06 01:51:06.442 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 25029 pkts 25028 lost 0 resets 0 underruns 0 buffer 220 ms target 250 rms -14.0 dB
+11-06 01:51:06.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 989486 packet(s))
+11-06 01:51:11.445 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 25531 pkts 25530 lost 0 resets 0 underruns 0 buffer 235 ms target 250 rms -13.4 dB
+11-06 01:51:11.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 991486 packet(s))
+11-06 01:51:16.306 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 50 max 65 ms, stalls >500 ms: 0 (498 samples)
+11-06 01:51:16.452 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 26031 pkts 26030 lost 0 resets 0 underruns 0 buffer 225 ms target 250 rms -15.0 dB
+11-06 01:51:16.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 993486 packet(s))
+11-06 01:51:19.201 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.159:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:51:21.455 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 26531 pkts 26530 lost 0 resets 0 underruns 0 buffer 223 ms target 250 rms -13.6 dB
+11-06 01:51:21.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 995486 packet(s))
+11-06 01:51:22.006 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:51:26.310 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 50 max 61 ms, stalls >500 ms: 0 (499 samples)
+11-06 01:51:26.472 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 27032 pkts 27031 lost 0 resets 0 underruns 0 buffer 226 ms target 250 rms -13.9 dB
+11-06 01:51:26.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 997486 packet(s))
+11-06 01:51:30.412 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.159:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:51:31.475 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 27534 pkts 27533 lost 0 resets 0 underruns 0 buffer 234 ms target 250 rms -12.7 dB
+11-06 01:51:31.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 999486 packet(s))
+11-06 01:51:33.216 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:51:36.314 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 50 max 52 ms, stalls >500 ms: 0 (499 samples)
+11-06 01:51:36.477 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 28034 pkts 28033 lost 0 resets 0 underruns 0 buffer 232 ms target 250 rms -12.9 dB
+11-06 01:51:36.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 1001486 packet(s))
+11-06 01:51:41.477 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 28534 pkts 28533 lost 0 resets 0 underruns 0 buffer 230 ms target 250 rms -13.7 dB
+11-06 01:51:41.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 1003486 packet(s))
+11-06 01:51:46.320 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 50 max 58 ms, stalls >500 ms: 0 (502 samples)
+11-06 01:51:46.477 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 29034 pkts 29033 lost 0 resets 0 underruns 0 buffer 226 ms target 250 rms -13.1 dB
+11-06 01:51:46.633 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 1005486 packet(s))
+11-06 01:51:51.499 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 29534 pkts 29532 lost 0 resets 0 underruns 0 buffer 219 ms target 250 rms -15.1 dB
+11-06 01:51:51.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 1007486 packet(s))
+11-06 01:51:56.323 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 50 max 54 ms, stalls >500 ms: 0 (501 samples)
+11-06 01:51:56.506 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 30037 pkts 30035 lost 0 resets 0 underruns 0 buffer 227 ms target 250 rms -10.9 dB
+11-06 01:51:56.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 1009486 packet(s))
+11-06 01:52:01.241 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.159:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:52:01.516 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 30538 pkts 30536 lost 0 resets 0 underruns 0 buffer 226 ms target 250 rms -13.9 dB
+11-06 01:52:01.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 1011486 packet(s))
+11-06 01:52:04.041 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:52:06.328 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 50 max 39 ms, stalls >500 ms: 0 (499 samples)
+11-06 01:52:06.517 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 31038 pkts 31036 lost 0 resets 0 underruns 0 buffer 233 ms target 250 rms -14.7 dB
+11-06 01:52:06.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 1013486 packet(s))
+11-06 01:52:06.846 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.159:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:52:11.526 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 31537 pkts 31535 lost 0 resets 0 underruns 0 buffer 226 ms target 250 rms -14.0 dB
+11-06 01:52:11.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 1015486 packet(s))
+11-06 01:52:15.257 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:52:16.331 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 50 max 58 ms, stalls >500 ms: 0 (501 samples)
+11-06 01:52:16.537 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 32040 pkts 32038 lost 0 resets 0 underruns 0 buffer 237 ms target 250 rms -13.6 dB
+11-06 01:52:16.633 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 1017486 packet(s))
+11-06 01:52:18.057 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.159:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:52:21.546 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 32541 pkts 32538 lost 0 resets 0 underruns 0 buffer 214 ms target 250 rms -14.0 dB
+11-06 01:52:21.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 1019486 packet(s))
+11-06 01:52:23.660 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:52:26.334 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 50 max 53 ms, stalls >500 ms: 0 (500 samples)
+11-06 01:52:26.547 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 33041 pkts 33038 lost 0 resets 0 underruns 0 buffer 231 ms target 250 rms -16.1 dB
+11-06 01:52:26.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 1021486 packet(s))
+11-06 01:52:31.555 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 33542 pkts 33539 lost 0 resets 0 underruns 0 buffer 226 ms target 250 rms -16.8 dB
+11-06 01:52:31.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 1023486 packet(s))
+11-06 01:52:32.066 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.159:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:52:36.336 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 25 max 60 ms, stalls >500 ms: 0 (500 samples)
+11-06 01:52:36.555 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 34042 pkts 34039 lost 0 resets 0 underruns 0 buffer 235 ms target 250 rms -15.8 dB
+11-06 01:52:36.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 1025486 packet(s))
+11-06 01:52:37.670 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:52:40.470 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.159:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:52:41.565 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 34543 pkts 34540 lost 0 resets 0 underruns 0 buffer 221 ms target 250 rms -15.1 dB
+11-06 01:52:41.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 1027486 packet(s))
+11-06 01:52:46.075 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:52:46.338 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 25 max 58 ms, stalls >500 ms: 0 (501 samples)
+11-06 01:52:46.571 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 35043 pkts 35040 lost 0 resets 0 underruns 0 buffer 224 ms target 250 rms -13.6 dB
+11-06 01:52:46.632 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 1029486 packet(s))
+11-06 01:52:51.575 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 35544 pkts 35541 lost 0 resets 0 underruns 0 buffer 224 ms target 250 rms -14.2 dB
+11-06 01:52:51.631 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 1031486 packet(s))
+11-06 01:52:51.676 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.159:47900 (downlink unanswered, hb loss 100 %)
+11-06 01:52:56.340 27436 30689 I siren   : bt: link quality: 1 link(s), tx 7.8 KB/s, rx 5.8 KB/s, write drops 0, gap p50 10 p90 25 p99 50 max 63 ms, stalls >500 ms: 0 (500 samples)
+11-06 01:52:56.575 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 36044 pkts 36041 lost 0 resets 0 underruns 0 buffer 234 ms target 250 rms -16.7 dB
+11-06 01:52:56.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 1033486 packet(s))
+11-06 01:53:01.585 27436 30675 I siren   : udp: stream 2833006126823860669 bt seq 36545 pkts 36542 lost 0 resets 0 underruns 0 buffer 244 ms target 250 rms -14.7 dB
+11-06 01:53:01.630 27436 30683 I siren   : mesh: tx level -15.1 dB (1 Wi-Fi link(s), 1035486 packet(s))
+11-06 01:53:02.881 27436 30683 I siren   : mesh: 836c47c621873a1e retargeted to 192.168.2.196:47900 (downlink unanswered, hb loss 100 %)
